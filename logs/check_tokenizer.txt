@@ -1,0 +1,114 @@
+got     : ['0', 'Men', 'Lyrics', 'Waiting', 'For', "Ain't", 'It', 'Strange', 'LyricsFans.com', 'state', 'of', 'the', 'art', 'USA', '3.14', 'RMB500yuan', '025', '84791919', '16099kefu@163.com', 'www.16099.com', 'set', 'up', 'não']
+expected: ['0', 'Men', 'Lyrics', 'Waiting', 'For', "Ain't", 'It', 'Strange', 'LyricsFans.com', 'state', 'of', 'the', 'art', 'USA', '3.14', 'RMB500yuan', '025', '84791919', '16099kefu@163.com', 'www.16099.com', 'set', 'up', 'não']
+SAMPLE OK
+
+default [(1, '0'), (2, 'men'), (3, 'lyrics'), (4, 'waiting'), (5, 'for'), (6, "ain't"), (7, 'it'), (8, 'strange'), (9, 'lyricsfans.com'), (10, 'state'), (11, 'of'), (12, 'the'), (13, 'art'), (14, 'usa'), (15, '3.14'), (16, 'rmb500yuan'), (17, '025'), (18, '84791919'), (19, '16099kefu@163.com'), (20, 'www.16099.com'), (21, 'set'), (22, 'up'), (23, 'não')]
+{'casefold': False} [(1, '0'), (2, 'Men'), (3, 'Lyrics'), (4, 'Waiting'), (5, 'For'), (6, "Ain't"), (7, 'It'), (8, 'Strange'), (9, 'LyricsFans.com'), (10, 'state'), (11, 'of'), (12, 'the'), (13, 'art'), (14, 'USA'), (15, '3.14'), (16, 'RMB500yuan'), (17, '025'), (18, '84791919'), (19, '16099kefu@163.com'), (20, 'www.16099.com'), (21, 'set'), (22, 'up'), (23, 'não')]
+{'stopword': True} [(1, '0'), (2, 'men'), (3, 'lyrics'), (4, 'waiting'), (6, "ain't"), (8, 'strange'), (9, 'lyricsfans.com'), (10, 'state'), (13, 'art'), (14, 'usa'), (15, '3.14'), (16, 'rmb500yuan'), (17, '025'), (18, '84791919'), (19, '16099kefu@163.com'), (20, 'www.16099.com'), (21, 'set'), (23, 'não')]
+{'stopword': True, 'stem': True} [(1, '0'), (2, 'men'), (3, 'lyric'), (4, 'wait'), (6, "ain't"), (8, 'strang'), (9, 'lyricsfans.com'), (10, 'state'), (13, 'art'), (14, 'usa'), (15, '3.14'), (16, 'rmb500yuan'), (17, '025'), (18, '84791919'), (19, '16099kefu@163.com'), (20, 'www.16099.com'), (21, 'set'), (23, 'não')]
+
+extra: ['Inc', 'Dr', 'conditions', 'code', "don't", 'copyright', 'beijing', 'hyphen', '18/04/2007', 'it', "don't", 'support', 'beijing', 'and', 'or', '1/2', 'type', 'text'] OK
+
+34786 docs, 27551904 tokens, vocab 646605
+total 361.2s (tokenize 150.3s)
+est. full 34786 docs: tokenize ~150s, all ~361s
+tokens with U+FFFD: 0
+
+top 30 terms:
+  966687  'the'
+  557596  'and'
+  537199  'of'
+  523778  'to'
+  440569  'a'
+  367467  'in'
+  239304  'for'
+  207971  'is'
+  171118  'i'
+  166226  'on'
+  164754  'you'
+  152182  'that'
+  141385  'it'
+  138025  'this'
+  136876  'with'
+  131314  'by'
+  106436  'or'
+  100666  'as'
+  100595  'are'
+   97916  'at'
+   97441  'be'
+   96663  'your'
+   87277  'from'
+   77330  '2008'
+   77172  'all'
+   74657  '1'
+   72790  'my'
+   70953  'not'
+   68123  'have'
+   67101  'we'
+
+top 40 non-alnum terms:
+   15325  "don't"
+    5340  "can't"
+    4218  "didn't"
+    4057  "doesn't"
+    3581  '2.0'
+    3206  "isn't"
+    2857  '0.99'
+    2263  "won't"
+    2174  'about.com'
+    1656  "wasn't"
+    1651  '1.0'
+    1514  "aren't"
+    1346  "haven't"
+    1272  'ceoclips.com'
+    1259  "wouldn't"
+    1245  'holisticonline.com'
+    1232  '1stholistic.com'
+    1204  '1/2'
+    1197  "couldn't"
+    1071  's&p'
+     923  '1.2'
+     854  'info@holisticonline.com'
+     838  'www.grandmasremedies.com'
+     821  '2.5'
+     820  "bahá'í"
+     815  'www.specialgifts.com'
+     813  'www.entrepreneurismbible.com'
+     806  '1.5'
+     802  'del.icio.us'
+     759  '7:30'
+     720  'wordpress.com'
+     705  '10,000'
+     694  "hasn't"
+     657  '3.0'
+     657  '0.00'
+     648  'auto.wizz.com'
+     640  '2bangkok.com'
+     626  'doi:10.1164'
+     609  '1,000'
+     570  '0.5'
+
+longest 20 terms:
+  2448       5  'http://www.divxcrawler.com/http://www.divxtube.ca/divx/http://www.download-tv-no'
+  1251       1  'pcetlsbizwdpbibhzcb0ywcgls0+cjxzy3jpchqgbgfuz3vhz2u9ikphdmfty3jpchqiihr5cgu9inrl'
+  1251       1  'pcetlsbizwdpbibhzcb0ywcgls0+cjxzy3jpchqgbgfuz3vhz2u9ikphdmfty3jpchqiihr5cgu9inrl'
+  1251       1  'pcetlsbizwdpbibhzcb0ywcgls0+cjxzy3jpchqgbgfuz3vhz2u9ikphdmfty3jpchqiihr5cgu9inrl'
+  1251       1  'pcetlsbizwdpbibhzcb0ywcgls0+cjxzy3jpchqgbgfuz3vhz2u9ikphdmfty3jpchqiihr5cgu9inrl'
+  1239       1  'pcetlsbizwdpbibhzcb0ywcgls0+cjxzy3jpchqgbgfuz3vhz2u9ikphdmfty3jpchqiihr5cgu9inrl'
+  1119       1  'pcetlsbizwdpbibhzcb0ywcgls0+cjxzy3jpchqgbgfuz3vhz2u9ikphdmfty3jpchqiihr5cgu9inrl'
+  1119       1  'pcetlsbizwdpbibhzcb0ywcgls0+cjxzy3jpchqgbgfuz3vhz2u9ikphdmfty3jpchqiihr5cgu9inrl'
+  1023       1  'pcetlsbizwdpbibhzcb0ywcgls0+cjxpznjhbwugc3jjpsjodhrwoi8vywquzguuzg91ymxly2xpy2su'
+   923       1  'pcetlsbizwdpbibhzcb0ywcgls0+cjxpznjhbwugc3jjpsjodhrwoi8vywquzxmuzg91ymxly2xpy2su'
+   915       1  'pcetlsbizwdpbibhzcb0ywcgls0+cjxzy3jpchqgbgfuz3vhz2u9ikphdmfty3jpchqiihr5cgu9inrl'
+   915       1  'pcetlsbizwdpbibhzcb0ywcgls0+cjxzy3jpchqgbgfuz3vhz2u9ikphdmfty3jpchqiihr5cgu9inrl'
+   915       1  'pcetlsbizwdpbibhzcb0ywcgls0+cjxzy3jpchqgbgfuz3vhz2u9ikphdmfty3jpchqiihr5cgu9inrl'
+   915       1  'pcetlsbizwdpbibhzcb0ywcgls0+cjxzy3jpchqgbgfuz3vhz2u9ikphdmfty3jpchqiihr5cgu9inrl'
+   915       1  'pcetlsbizwdpbibhzcb0ywcgls0+cjxzy3jpchqgbgfuz3vhz2u9ikphdmfty3jpchqiihr5cgu9inrl'
+   915       1  'pcetlsbizwdpbibhzcb0ywcgls0+cjxzy3jpchqgbgfuz3vhz2u9ikphdmfty3jpchqiihr5cgu9inrl'
+   907       1  'pcetlsbizwdpbibhzcb0ywcgls0+cjxzy3jpchqgbgfuz3vhz2u9ikphdmfty3jpchqiihr5cgu9inrl'
+   907       1  'pcetlsbizwdpbibhzcb0ywcgls0+cjxzy3jpchqgbgfuz3vhz2u9ikphdmfty3jpchqiihr5cgu9inrl'
+   907       1  'pcetlsbizwdpbibhzcb0ywcgls0+cjxzy3jpchqgbgfuz3vhz2u9ikphdmfty3jpchqiihr5cgu9inrl'
+   907       1  'pcetlsbizwdpbibhzcb0ywcgls0+cjxzy3jpchqgbgfuz3vhz2u9ikphdmfty3jpchqiihr5cgu9inrl'
+terms len > 40: 8119
+hapax (freq 1): 363083
+
