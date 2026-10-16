@@ -1,0 +1,8 @@
+{
+  "python.analysis.extraPaths": [
+    "./HW1"
+  ],
+  "python.autoComplete.extraPaths": [
+    "./HW1"
+  ]
+}
