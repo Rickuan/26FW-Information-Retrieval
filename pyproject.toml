@@ -1,0 +1,13 @@
+[project]
+name = "hw1"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "beautifulsoup4>=4.15.0",
+    "ftfy>=6.3.1",
+    "langdetect>=1.0.9",
+    "lxml>=6.1.3",
+]
+
