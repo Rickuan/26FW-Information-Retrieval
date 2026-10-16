@@ -47,14 +47,14 @@
 
 | 步驟編號 | 子任務項目 | 具體工作項目與產出物 | 關聯檔案 | 狀態 | 備註 |
 | :---: | :--- | :--- | :--- | :---: | :--- |
-| **Step 1** | **環境與相依套件設置** | 安裝 `warcio`, `beautifulsoup4`, `lxml`, `ftfy`, `tqdm`，並驗證虛擬環境 | `pyproject.toml` | **未完成** | 確認 `uv` 安裝無誤 |
-| **Step 2** | **資料結構定義** | 定義 `Document` dataclass 與 `LoaderConfig` 設定類別 | `HW1/src/models.py` 或 `HW1/src/config.py` | **未完成** | 統一規格 |
-| **Step 3** | **WARC 串流解析核心** | 實作串流迭代器，過濾 `response` 記錄並提取 `WARC-TREC-ID` 與 URI | `HW1/src/loader.py` | **未完成** | 基於 `warcio` |
-| **Step 4** | **HTTP Payload 解耦** | 分離 HTTP 標頭與 Body，依 Content-Type 與狀態碼過濾無效頁面 | `HW1/src/loader.py` | **未完成** | 處理 HTTP/1.1 |
-| **Step 5** | **HTML 清洗器 (Cleaner)** | 使用 `lxml` / `BeautifulSoup` 剔除 script/style，轉換 Entities，修復編碼 | `HW1/src/cleaner.py` | **未完成** | 結合 `ftfy` |
-| **Step 6** | **例外處理與記憶體監控** | 加上 `try...except` 容錯防護，加入 `tqdm` 進度條與記憶體用量回報 | `HW1/src/loader.py` | **未完成** | RSS < 500MB |
-| **Step 7** | **單元測試撰寫** | 撰寫 mock WARC 記錄之單元測試，驗證 8 項驗收標準 | `HW1/tests/test_loader.py` | **未完成** | `pytest` 測試 |
-| **Step 8** | **真檔抽樣驗證與評測** | 對 `HW1/04.warc` 前 1,000 筆文件執行抽樣抽取，驗證解析速度與記憶體 | `HW1/scripts/verify_loader.py` | **未完成** | 產出抽樣結果 |
+| **Step 1** | **環境與相依套件設置** | 安裝 `warcio`, `beautifulsoup4`, `lxml`, `ftfy`, `tqdm`, `psutil`, `pytest` 並驗證環境 | `pyproject.toml` | ✅ | 所有套件安裝成功且可正常 import |
+| **Step 2** | **資料結構定義** | 定義 `Document` dataclass 與 `LoaderConfig` 設定類別 | `HW1/src/models.py`, `HW1/src/config.py` | ✅ | 分立架構完成，支援 slots 記憶體優化 |
+| **Step 3** | **WARC 串流解析核心** | 實作串流迭代器，過濾 `response` 記錄並提取 `WARC-TREC-ID` 與 URI | `HW1/src/loader.py` | ✅ | 處理 ClueWeb09 格式邊界，串流解析驗證成功 |
+| **Step 4** | **HTTP Payload 解耦** | 分離 HTTP 標頭與 Body，依 Content-Type 與狀態碼過濾無效頁面 | `HW1/src/loader.py` | ❌ | 處理 HTTP/1.1 |
+| **Step 5** | **HTML 清洗器 (Cleaner)** | 使用 `lxml` / `BeautifulSoup` 剔除 script/style，轉換 Entities，修復編碼 | `HW1/src/cleaner.py` | ❌ | 結合 `ftfy` |
+| **Step 6** | **例外處理與記憶體監控** | 加上 `try...except` 容錯防護，加入 `tqdm` 進度條與記憶體用量回報 | `HW1/src/loader.py` | ❌ | RSS < 500MB |
+| **Step 7** | **單元測試撰寫** | 撰寫 mock WARC 記錄之單元測試，驗證 8 項驗收標準 | `HW1/tests/test_loader.py` | ❌ | `pytest` 測試 |
+| **Step 8** | **真檔抽樣驗證與評測** | 對 `HW1/04.warc` 前 1,000 筆文件執行抽樣抽取，驗證解析速度與記憶體 | `HW1/scripts/verify_loader.py` | ❌ | 產出抽樣結果 |
 
 ---
 
