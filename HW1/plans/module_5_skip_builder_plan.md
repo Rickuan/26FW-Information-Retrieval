@@ -68,6 +68,14 @@ class PostingWithSkip:
 - [ ] 35K 文件完整索引處理 < 30 s
 - [ ] 🆕 印出 build 前後 Peak RSS，增加量記錄於報告
 
+**呼叫 M3 的方式**
+
+| 工作 | 用什麼 |
+|---|---|
+| `SkipBuilder.build` — 走訪所有詞 | `iter_postings()`（全記憶體模式；SPIMI 模式直接略過） |
+| 統計 df ≥ 9 的詞數 | `idx.df(term)`（不需組 Posting） |
+| `intersect_*` / AND 查詢 | SkipBuilder 建好的結果 dict（不要每次查詢都呼叫 `get_postings()`） |
+
 ---
 
 ### Step 5-C：`intersect_with_skips`
