@@ -129,6 +129,16 @@ def format_line(term, plist):
 - [ ] 輸出與分別呼叫 4-A / 4-D 完全相同
 - [ ] `Indexer(spimi=True)` 下可產生完整輸出，且與全記憶體模式逐 byte 相同
 
+**呼叫 M3 的方式**
+
+| 工作 | 用什麼 |
+|---|---|
+| 寫 dictionary / postings text / postings.bin / lexicon | `iter_postings()`（已排序，兩種模式通用；建議在同一個 pass 一起寫） |
+| 寫 metadata / doc_map | `idx.stats`、`idx.doc_map`（兩種模式都在記憶體） |
+| `IndexReader` 驗證 AC | `idx.get_postings(term)`（全記憶體模式） |
+
+> 原本 `for term in sorted(idx.index)` 改為 `for term, plist in idx.iter_postings()`，兩種模式都支援且不必自行排序。
+
 ---
 
 ## 3. 對外介面
