@@ -1,0 +1,11 @@
+  ...5000 docs (50s)
+  ...10000 docs (114s)
+  ...15000 docs (162s)
+  ...20000 docs (217s)
+  ...25000 docs (272s)
+  ...30000 docs (339s)
+  merged 10 partials (18s)
+
+mode=spimi  time=412.2s  peak RSS=855 MB
+stats: {'N': 34786, 'vocab_size': 644523, 'total_tokens': 27549214, 'avg_doc_len': 791.9626861381015}
+partials: 10

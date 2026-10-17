@@ -230,3 +230,6 @@ __marimo__/
 *.log
 
 *:Zone.Identifier
+
+spimi_tmp/
+spimi_test_tmp/

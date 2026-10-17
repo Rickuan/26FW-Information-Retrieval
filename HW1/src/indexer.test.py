@@ -11,7 +11,7 @@ def unit():
     add_document(index, dm, 5, "t5", "u5", [(1, "a"), (2, "b"), (3, "a"), (5, "a")])
     add_document(index, dm, 7, "t7", "u7", [(2, "a")])
     add_document(index, dm, 9, "t9", "u9", [])
-    assert [(p.doc_num, p.tf, p.positions) for p in index["a"]] == [(5, 3, [1, 3, 5]), (7, 1, [2])]
+    assert [(p.doc_num, p.tf, list(p.positions)) for p in index["a"]] == [(5, 3, [1, 3, 5]), (7, 1, [2])]
     assert index["b"][0].tf == 1
     assert dm[5].doc_len == 4 and dm[9].doc_len == 0
     assert all(p.doc_num != 9 for pl in index.values() for p in pl)
