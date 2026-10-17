@@ -1,0 +1,17 @@
+  ...5000 docs (53s)
+  ...10000 docs (114s)
+  ...15000 docs (158s)
+  ...20000 docs (212s)
+  ...25000 docs (265s)
+  ...30000 docs (328s)
+
+built both indexes in 379.2s   stats: {'N': 34786, 'vocab_size': 644523, 'total_tokens': 27549214, 'avg_doc_len': 791.9626861381015}
+
+task                               old (list)  new (columnar)   new/old  same result
+----------------------------------------------------------------------------------
+traverse all postings                   1.33s           3.50s     2.64x  True
+format assignment text (M4)            12.51s          13.71s     1.10x  True
+10k random term lookups                 0.01s           0.10s     9.81x  True
+top-100 df lookups x 10 (M5)            0.00s           9.23s 124011.71x  True
+
+peak RSS (both indexes in memory): 3690 MB

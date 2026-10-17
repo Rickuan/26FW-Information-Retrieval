@@ -1,6 +1,22 @@
 # Module 5：Skip Builder & AND Query — 實作計畫
 > **檔案**：`HW1/src/skip_builder.py` | **狀態**：⬜ 待實作  
-> **上游**：M3 `Indexer.index` | **下游**：M4 Writer（binary format）
+> **上游**：M3 `Indexer`（全記憶體模式） | **下游**：M4 Writer（binary format）
+
+---
+
+## 0. 變更紀錄（因應 M3 實作）
+
+| 項目 | 原計畫 | 修改後 | 理由 |
+|---|---|---|---|
+| 🔄 執行模式 | — | 僅全記憶體模式；SPIMI 模式略過 | AND 查詢需隨機存取；SPIMI 建完後 `index` 為空 |
+| 🔄 讀取索引 | 遍歷 `indexer.index` | `iter_postings()`（建 skip）、`get_postings()`（查詢） | 與 M3 介面一致 |
+| 🔄 `PostingWithSkip.positions` | `list[int]`（複製） | 引用 `Posting.positions`（`array('I')`），不複製 | 1,183 萬筆 posting，複製會再增加數 GB |
+| 🔄 skip 節點數 AC | `floor(P / L)` | `floor((P - 1) / L)` | P = 9、L = 3 時只有 index 0、3 可建（6 + 3 超界） |
+| 🆕 查詢詞正規化 | — | 查詢前經過同一個 `Preprocessor` | casefold / stem 開啟時 `"Games"` → `game` |
+| 🆕 重複查詢 | — | 不要在迴圈中對同一詞反覆呼叫 `get_postings()` | M3 欄式儲存每次取值都重新組出 Posting；高頻詞每次約 9 ms |
+| 🆕 記憶體 AC | — | 量測 SkipBuilder 前後 Peak RSS | 確認可在一般機器執行 |
+
+**M3 已提供的效能參考**（全量）：走訪全部 postings 約 3.5 s；`get_postings` 高頻詞（df 約 3 萬）每次約 9 ms、隨機詞約 0.01 ms。
 
 ---
 
@@ -9,53 +25,55 @@
 ```python
 @dataclass(slots=True)
 class SkipPointer:
-    target_doc_num: int   # 跳躍目標的 doc_num（用於比較）
-    target_index: int     # 跳躍目標在 list 中的 index
+    target_doc_num: int
+    target_index: int
 
 @dataclass(slots=True)
 class PostingWithSkip:
     doc_num: int
     tf: int
-    positions: list[int]
-    skip: SkipPointer | None   # None = 無 skip pointer
+    positions: array            # 🔄 引用 Posting.positions（array('I')），不複製
+    skip: SkipPointer | None
 ```
 
-**間隔策略**：`L = floor(sqrt(P))`；`P < MIN_SKIP_LEN = 9` 不建立
+**間隔策略**：`L = floor(sqrt(P))`；`P < MIN_SKIP_LEN = 9` 不建立  
+**skip 位置**：index `0, L, 2L, ...`，且僅在 `i + L < P` 時建立
 
 ---
 
 ## 2. 工項與 AC
 
 ### Step 5-A：`build_skip_list`
-**工項**
 - [ ] `build_skip_list(postings: list[Posting]) -> list[PostingWithSkip]`
   - `P < 9` → 全部 `skip=None`
-  - 否則對 index `0, L, 2L, ...` 設 skip，指向 `index + L`（需 bound check）
+  - 否則 index `0, L, 2L, ...` 且 `i + L < P` 設 skip 指向 `i + L`
+  - 🔄 `positions=p.positions`（不要 `list(p.positions)`）
 
 **AC**
-- 帶 skip 的節點數 == `floor(P / L)`
-- `result[i].skip.target_doc_num == result[i + L].doc_num`
-- `P < 9` 時所有節點 `skip is None`
+- [ ] 🔄 帶 skip 的節點數 == `floor((P - 1) / L)`（P ≥ 9）
+- [ ] `result[i].skip.target_doc_num == result[i + L].doc_num`
+- [ ] `P < 9` 時所有節點 `skip is None`
+- [ ] 🆕 `result[i].positions is postings[i].positions`（同一次 `get_postings` 結果內，確認未複製）
 
 ---
 
 ### Step 5-B：`SkipBuilder.build(indexer)`
-**工項**
-- [ ] 遍歷 `indexer.index`，對每個 term 呼叫 `build_skip_list`
-- [ ] 回傳新的 `dict[str, list[PostingWithSkip]]`（不修改原始 Indexer）
-- [ ] 印出統計：有 skip 的 term 數、平均 skip interval
+- [ ] 🔄 `for term, plist in indexer.iter_postings():` 對每個 term 呼叫 `build_skip_list`
+- [ ] 回傳 `dict[str, list[PostingWithSkip]]`（不修改 Indexer）
+- [ ] 印出：有 skip 的 term 數、平均 skip interval
+- [ ] 🆕 `indexer.spimi` 為 True 時印提示並回傳空 dict
 
 **AC**
-- 有 skip 的 term 數 == df ≥ 9 的 term 數
-- 35K 文件完整索引處理 < 30s
+- [ ] 有 skip 的 term 數 == df ≥ 9 的 term 數（可用 `indexer.df(t)` 計算，不需組 Posting）
+- [ ] 35K 文件完整索引處理 < 30 s
+- [ ] 🆕 印出 build 前後 Peak RSS，增加量記錄於報告
 
 ---
 
-### Step 5-C：`intersect_with_skips` 演算法
-**工項**
-- [ ] `intersect_basic(p1, p2) -> (list[int], int)`：線性掃描，計比較次數
+### Step 5-C：`intersect_with_skips`
+- [ ] `intersect_basic(p1, p2) -> (list[int], int)`
 - [ ] `intersect_with_skips(p1, p2) -> (list[int], int)`：
-  ```
+```
   i, j = 0, 0
   while i < len(p1) and j < len(p2):
       if p1[i].doc_num == p2[j].doc_num:
@@ -68,26 +86,25 @@ class PostingWithSkip:
           if p2[j].skip and p2[j].skip.target_doc_num <= p1[i].doc_num:
               j = p2[j].skip.target_index
           else: j++
-  ```
+```
+- [ ] 🆕 `and_query(skips, preprocessor, q1, q2)`：查詢詞先經 `preprocessor.process()`；被停用詞移除時回傳空結果並提示；postings 一律從 `skips` dict 取（已建好，不重複呼叫 `get_postings`）
 
 **AC**
-- `intersect_basic` 與 `intersect_with_skips` 結果集完全相同
-- skip 版本比較次數 ≤ basic 版本（對所有測試 pair）
-- 高頻詞 pair（如 "game" AND "play"）比較次數減少 > 20%
+- [ ] 兩演算法結果集完全相同
+- [ ] skip 版比較次數 ≤ basic 版
+- [ ] 高頻詞 pair（如 "game" AND "play"）比較次數減少 > 20%
+- [ ] 🆕 casefold + stem 開啟時 `and_query(..., "Games", "play")` 與 `"game" AND "play"` 結果相同
 
 ---
 
-### Step 5-D：效能評測腳本 `skip_builder.test.py`
-**工項**
-- [ ] 測試 5 組 term pair（長+短、高頻+高頻、無交集、df<9）
-- [ ] 輸出格式：
-  ```
-  "game" (df=X) AND "play" (df=Y) → result=Z, basic=N1, skip=N2, speedup=N1/N2x
-  ```
+### Step 5-D：`skip_builder.test.py`
+- [ ] 5 組 term pair（長+短、高頻+高頻、無交集、df < 9）
+- [ ] 輸出：`"game" (df=X) AND "play" (df=Y) → result=Z, basic=N1, skip=N2, speedup=N1/N2x`
 
 **AC**
-- 5 組結果均正確（兩演算法輸出一致）
-- 表格可直接貼入作業報告
+- [ ] 5 組結果均正確
+- [ ] 表格可直接貼入報告
+- [ ] 🆕 註明 Preprocessor 設定
 
 ---
 
@@ -98,11 +115,13 @@ class SkipBuilder:
     MIN_SKIP_LEN: int = 9
     def build(self, indexer: Indexer) -> dict[str, list[PostingWithSkip]]: ...
 
-def intersect_with_skips(
-    p1: list[PostingWithSkip],
-    p2: list[PostingWithSkip],
-) -> tuple[list[int], int]: ...   # (matched_doc_nums, n_comparisons)
+def intersect_with_skips(p1, p2) -> tuple[list[int], int]: ...
+
+def and_query(skips, preprocessor, q1: str, q2: str) -> tuple[list[int], int]: ...  # 🆕
 ```
 
-> **注意**：`target_index` 是 Python list index（記憶體用）；M4 binary 格式改存 byte offset。  
-> 「比較次數」定義：每次 `doc_num` 大小比較算一次（兩演算法統一口徑）。
+> **注意**
+> - 僅全記憶體模式；SPIMI 模式下略過，不影響 M4 評分輸出
+> - `target_index` 為 list index；M4 binary 格式改存 byte offset
+> - 「比較次數」：每次 `doc_num` 大小比較算一次
+> - `get_postings()` 每次都重新組出物件：建好 `skips` 後一律從 dict 取用
