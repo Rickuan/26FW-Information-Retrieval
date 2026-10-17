@@ -20,7 +20,7 @@
 | M2 | Tokenizer & Normalizer | `tokenizer.py` | ✅ 完成 | （同 M1） |
 | M3 | Inverted Indexer (SPIMI) | `indexer.py` | ✅ 完成 | `.done.module_3_indexer_plan.md` |
 | M4 | Index Writer & Reader | `writer.py` | ✅ 完成 | `.done.module_4_writer_plan.md` |
-| M5 | Skip Builder & AND Query | `skip_builder.py` | ⬜ 待實作 | `module_5_skip_builder_plan.md` |
+| M5 | Skip Builder & AND Query | `skip_builder.py` | ✅ 完成 | `module_5_skip_builder_plan.md` |
 | Step 6 | Integration Pipeline & User Slice | `main.py` | ⬜ 待實作 | `user_slice_plan.md` |
 
 ---
@@ -94,7 +94,7 @@ HW1/
 | Phase 1 & 2 | M1 Loader + M2 Tokenizer | `warc.py`, `extract.py`, `tokenizer.py` | ✅ 完成 |
 | Phase 3 | M3 Indexer + SPIMI | `indexer.py`, `indexer.test.py` | ✅ 完成 |
 | Phase 4 | M4 Text & Binary Writer + Reader | `writer.py`, `writer.test.py` | ✅ 完成 |
-| Phase 5 | M5 Skip Builder + AND query | `skip_builder.py`, `skip_builder.test.py` | ⬜ 待實作 |
+| Phase 5 | M5 Skip Builder + AND query | `skip_builder.py`, `skip_builder.test.py` | ✅ 完成 |
 | Phase 6 | Step 6 User Slice CLI + 全量整合測試 | `main.py`, `output/*`, 評測報表 | ⬜ 待實作 |
 
 ---

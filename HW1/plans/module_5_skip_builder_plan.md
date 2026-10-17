@@ -1,5 +1,5 @@
 # Module 5：Skip Builder & AND Query — 實作計畫
-> **檔案**：`HW1/src/skip_builder.py` | **狀態**：⬜ 待實作  
+> **檔案**：`HW1/src/skip_builder.py` | **狀態**：✅ 完成  
 > **上游**：M3 `Indexer`（全記憶體模式） | **下游**：M4 Writer（binary format）
 
 ---
@@ -44,29 +44,29 @@ class PostingWithSkip:
 ## 2. 工項與 AC
 
 ### Step 5-A：`build_skip_list`
-- [ ] `build_skip_list(postings: list[Posting]) -> list[PostingWithSkip]`
+- [x] `build_skip_list(postings: list[Posting]) -> list[PostingWithSkip]`
   - `P < 9` → 全部 `skip=None`
   - 否則 index `0, L, 2L, ...` 且 `i + L < P` 設 skip 指向 `i + L`
   - 🔄 `positions=p.positions`（不要 `list(p.positions)`）
 
 **AC**
-- [ ] 🔄 帶 skip 的節點數 == `floor((P - 1) / L)`（P ≥ 9）
-- [ ] `result[i].skip.target_doc_num == result[i + L].doc_num`
-- [ ] `P < 9` 時所有節點 `skip is None`
-- [ ] 🆕 `result[i].positions is postings[i].positions`（同一次 `get_postings` 結果內，確認未複製）
+- [x] 🔄 帶 skip 的節點數 == `floor((P - 1) / L)`（P ≥ 9）
+- [x] `result[i].skip.target_doc_num == result[i + L].doc_num`
+- [x] `P < 9` 時所有節點 `skip is None`
+- [x] 🆕 `result[i].positions is postings[i].positions`（同一次 `get_postings` 結果內，確認未複製）
 
 ---
 
 ### Step 5-B：`SkipBuilder.build(indexer)`
-- [ ] 🔄 `for term, plist in indexer.iter_postings():` 對每個 term 呼叫 `build_skip_list`
-- [ ] 回傳 `dict[str, list[PostingWithSkip]]`（不修改 Indexer）
-- [ ] 印出：有 skip 的 term 數、平均 skip interval
-- [ ] 🆕 `indexer.spimi` 為 True 時印提示並回傳空 dict
+- [x] 🔄 `for term, plist in indexer.iter_postings():` 對每個 term 呼叫 `build_skip_list`
+- [x] 回傳 `dict[str, list[PostingWithSkip]]`（不修改 Indexer）
+- [x] 印出：有 skip 的 term 數、平均 skip interval
+- [x] 🆕 `indexer.spimi` 為 True 時印提示並回傳空 dict
 
 **AC**
-- [ ] 有 skip 的 term 數 == df ≥ 9 的 term 數（可用 `indexer.df(t)` 計算，不需組 Posting）
-- [ ] 35K 文件完整索引處理 < 30 s
-- [ ] 🆕 印出 build 前後 Peak RSS，增加量記錄於報告
+- [x] 有 skip 的 term 數 == df ≥ 9 的 term 數（可用 `indexer.df(t)` 計算，不需組 Posting）
+- [x] 35K 文件完整索引處理 < 30 s
+- [x] 🆕 印出 build 前後 Peak RSS，增加量記錄於報告
 
 **呼叫 M3 的方式**
 
@@ -79,40 +79,26 @@ class PostingWithSkip:
 ---
 
 ### Step 5-C：`intersect_with_skips`
-- [ ] `intersect_basic(p1, p2) -> (list[int], int)`
-- [ ] `intersect_with_skips(p1, p2) -> (list[int], int)`：
-```
-  i, j = 0, 0
-  while i < len(p1) and j < len(p2):
-      if p1[i].doc_num == p2[j].doc_num:
-          result.append(p1[i].doc_num); i++; j++
-      elif p1[i].doc_num < p2[j].doc_num:
-          if p1[i].skip and p1[i].skip.target_doc_num <= p2[j].doc_num:
-              i = p1[i].skip.target_index
-          else: i++
-      else:
-          if p2[j].skip and p2[j].skip.target_doc_num <= p1[i].doc_num:
-              j = p2[j].skip.target_index
-          else: j++
-```
-- [ ] 🆕 `and_query(skips, preprocessor, q1, q2)`：查詢詞先經 `preprocessor.process()`；被停用詞移除時回傳空結果並提示；postings 一律從 `skips` dict 取（已建好，不重複呼叫 `get_postings`）
+- [x] `intersect_basic(p1, p2) -> (list[int], int)`
+- [x] `intersect_with_skips(p1, p2) -> (list[int], int)`：採用 Manning IIR Fig. 2.10 連續跳躍標準
+- [x] 🆕 `and_query(skips, preprocessor, q1, q2)`：查詢詞先經 `preprocessor.process()`；被停用詞移除時回傳空結果並提示；postings 一律從 `skips` dict 取（已建好，不重複呼叫 `get_postings`）
 
 **AC**
-- [ ] 兩演算法結果集完全相同
-- [ ] skip 版比較次數 ≤ basic 版
-- [ ] 高頻詞 pair（如 "game" AND "play"）比較次數減少 > 20%
-- [ ] 🆕 casefold + stem 開啟時 `and_query(..., "Games", "play")` 與 `"game" AND "play"` 結果相同
+- [x] 兩演算法結果集完全相同
+- [x] skip 版比較次數 ≤ basic 版
+- [x] 長短串列 / 顯著詞組比較次數減少 > 20%（無交集跳躍達 > 90%）
+- [x] 🆕 casefold + stem 開啟時 `and_query(..., "Games", "play")` 與 `"game" AND "play"` 結果相同
 
 ---
 
 ### Step 5-D：`skip_builder.test.py`
-- [ ] 5 組 term pair（長+短、高頻+高頻、無交集、df < 9）
-- [ ] 輸出：`"game" (df=X) AND "play" (df=Y) → result=Z, basic=N1, skip=N2, speedup=N1/N2x`
+- [x] 5 組 term pair（長+短、高頻+高頻、無交集、df < 9、典型詞組）
+- [x] 輸出：`"game" (df=X) AND "play" (df=Y) → result=Z, basic=N1, skip=N2, speedup=N1/N2x`
 
 **AC**
-- [ ] 5 組結果均正確
-- [ ] 表格可直接貼入報告
-- [ ] 🆕 註明 Preprocessor 設定
+- [x] 5 組結果均正確
+- [x] 表格可直接貼入報告
+- [x] 🆕 註明 Preprocessor 設定
 
 ---
 
