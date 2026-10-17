@@ -20,7 +20,7 @@
 | M2 | Tokenizer & Normalizer | `tokenizer.py` | ✅ 完成 | （同 M1） |
 | M3 | Inverted Indexer (SPIMI) | `indexer.py` | ✅ 完成 | `.done.module_3_indexer_plan.md` |
 | M4 | Index Writer & Reader | `writer.py` | ✅ 完成 | `.done.module_4_writer_plan.md` |
-| M5 | Skip Builder & AND Query | `skip_builder.py` | ⬜ 待實作 | `module_5_skip_builder_plan.md` |
+| M5 | Skip Builder & AND Query | `skip_builder.py` | ✅ 完成 | `.done.module_5_skip_builder_plan.md` |
 | Step 6 | Integration Pipeline & User Slice | `main.py` | ⬜ 待實作 | `user_slice_plan.md` |
 
 ---
@@ -49,7 +49,7 @@
 - `IndexWriter.write_all()` 單次走訪同步產出 6 項產物
 - `IndexReader` 隨機存取驗證介面（seek + decode < 0.05s）
 
-### M5：Skip Builder（⬜ 待實作）
+### M5：Skip Builder（✅ 已完成）
 - 間隔 `L = floor(sqrt(P))`，P < 9 不建立
 - `SkipPointer(target_doc_num, target_index)`
 - `intersect_with_skips(p1, p2)` → `(doc_nums, n_comparisons)`
@@ -72,7 +72,7 @@ HW1/
 │   ├── .done.module_1_loader_plan.md
 │   ├── .done.module_3_indexer_plan.md
 │   ├── .done.module_4_writer_plan.md
-│   ├── module_5_skip_builder_plan.md
+│   ├── .done.module_5_skip_builder_plan.md
 │   └── user_slice_plan.md
 ├── src/
 │   ├── warc.py / extract.py / documents.py   # M1
@@ -94,7 +94,7 @@ HW1/
 | Phase 1 & 2 | M1 Loader + M2 Tokenizer | `warc.py`, `extract.py`, `tokenizer.py` | ✅ 完成 |
 | Phase 3 | M3 Indexer + SPIMI | `indexer.py`, `indexer.test.py` | ✅ 完成 |
 | Phase 4 | M4 Text & Binary Writer + Reader | `writer.py`, `writer.test.py` | ✅ 完成 |
-| Phase 5 | M5 Skip Builder + AND query | `skip_builder.py`, `skip_builder.test.py` | ⬜ 待實作 |
+| Phase 5 | M5 Skip Builder + AND query | `skip_builder.py`, `skip_builder.test.py` | ✅ 完成 |
 | Phase 6 | Step 6 User Slice CLI + 全量整合測試 | `main.py`, `output/*`, 評測報表 | ⬜ 待實作 |
 
 ---
