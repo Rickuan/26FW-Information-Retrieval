@@ -1,0 +1,10 @@
+  ...5000 docs (51s)
+  ...10000 docs (111s)
+  ...15000 docs (154s)
+  ...20000 docs (206s)
+  ...25000 docs (259s)
+  ...30000 docs (323s)
+
+mode=memory  time=374.6s  peak RSS=1110 MB
+stats: {'N': 34786, 'vocab_size': 644523, 'total_tokens': 27549214, 'avg_doc_len': 791.9626861381015}
+trie: 644523 terms, 770227 nodes, built in 2.3s, peak RSS 1110 -> 1156 MB

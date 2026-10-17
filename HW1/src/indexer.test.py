@@ -50,8 +50,9 @@ dt = time.time() - t0
 s = idx.stats
 print("\nstats:", s)
 
-npost = sum(len(pl) for pl in idx.index.values())
-npos = sum(p.tf for pl in idx.index.values() for p in pl)
+npost = sum(len(c.docs) for c in idx._cols.values())
+npos = sum(sum(c.tfs) for c in idx._cols.values())
+print("len(pos) == sum(tfs) for all terms:", all(len(c.pos) == sum(c.tfs) for c in idx._cols.values()))
 print(f"postings (term,doc pairs): {npost}   positions: {npos}")
 print("sum(tf) == total_tokens:", npos == s["total_tokens"])
 print("doc_len sum == total_tokens:", sum(e.doc_len for e in idx.doc_map.values()) == s["total_tokens"])
@@ -65,5 +66,5 @@ print(f"\ntime {dt:.1f}s   {s['N'] / dt:.1f} docs/s (incl. extract + tokenize)")
 print(f"peak RSS: {resource.getrusage(resource.RUSAGE_SELF).ru_maxrss / 1024:.0f} MB")
 
 print("\ntop 10 df:")
-for t, pl in sorted(idx.index.items(), key=lambda kv: -len(kv[1]))[:10]:
-    print(f"{len(pl):8d}  {t}")
+for t in sorted(idx._cols, key=idx.df, reverse=True)[:10]:
+    print(f"{idx.df(t):8d}  {t}")
