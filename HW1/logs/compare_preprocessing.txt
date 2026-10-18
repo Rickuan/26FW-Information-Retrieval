@@ -1,0 +1,29 @@
+  ...5000 docs (51s)
+  ...10000 docs (113s)
+  ...15000 docs (160s)
+  ...20000 docs (215s)
+  ...25000 docs (271s)
+  ...30000 docs (335s)
+
+34786 docs in 389.0s
+
+variant                 tokens      vocab  vs current  hapax %     postings  avg doc len
+----------------------------------------------------------------------------------------
+raw split           27,936,310  1,331,254    +106.5%    58.8%   13,913,499        803.1
+current             27,549,214    644,523      +0.0%    56.1%   11,834,013        792.0
+no numbers          26,084,303    581,609      -9.8%    55.7%   11,065,539        749.9
+no urls             27,411,030    581,907      -9.7%    53.5%   11,723,162        788.0
+no numbers+urls     25,947,021    519,614     -19.4%    52.9%   10,955,510        745.9
+
+in current vocab: 62,914 number-like terms (9.8%), 61,995 url/email terms (9.6%)
+number-like tokens: 1,464,911 (5.3% of tokens)
+url/email tokens  : 137,282 (0.5% of tokens)
+
+top 20 removed by 'no numbers':
+  2008 (77,330), 1 (74,657), 2 (61,130), 3 (41,338), 2007 (41,244), 4 (38,890), 5 (33,243), 2009 (27,775), 10 (27,571), 0 (26,727), 2006 (25,121), 6 (24,077), 7 (22,469), 8 (20,645), 12 (19,806), 9 (16,694), 11 (14,584), 20 (14,151), 13 (13,790), 15 (13,626)
+
+top 20 removed by 'no urls':
+  about.com (2,174), ceoclips.com (1,272), holisticonline.com (1,245), 1stholistic.com (1,232), info@holisticonline.com (854), www.grandmasremedies.com (838), www.specialgifts.com (815), www.entrepreneurismbible.com (813), del.icio.us (802), wordpress.com (720), auto.wizz.com (648), 2bangkok.com (640), 8help@osu.edu (536), myspace.com (497), www.osu.edu (494), wordpress.org (493), wikipedia.org (475), 123india.com (466), amazon.com (427), games.com (426)
+
+raw split: frequent tokens with punctuation attached (examples):
+  - (182,464), | (136,183), , (89,103), & (77,245), . (51,984), ( (29,359), : (28,307), » (25,982), ... (25,793), • (25,688), ► (23,044), > (21,862), / (20,610), ) (18,844), (1) (17,674), Tags: (14,285), -- (13,770), * (13,410), (4) (12,874), · (11,030)
