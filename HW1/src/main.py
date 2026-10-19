@@ -64,15 +64,20 @@ def run_build(args: argparse.Namespace) -> None:
     print(f"  - 輸入檔案：{warc_path}")
     print(f"  - 輸出目錄：{out_dir}")
     print(f"  - 建置模式：{args.mode.upper()}")
-    print(f"  - 文件上限：{args.limit or '全量'}")
-    print(f"  - Preprocessor：casefold=True, stopword={not args.no_stopword}, stem={not args.no_stem}")
+    casefold_opt = not getattr(args, "no_casefold", False)
+    stopword_opt = not args.no_stopword
+    stem_opt = not args.no_stem and not getattr(args, "lemma", False)
+    lemma_opt = bool(getattr(args, "lemma", False))
+
+    print(f"  - Preprocessor：casefold={casefold_opt}, stopword={stopword_opt}, stem={stem_opt}, lemma={lemma_opt}")
     print("=" * 70)
 
     # 1. 初始化 Preprocessor 與 Indexer
     preprocessor = Preprocessor(
-        casefold=True,
-        stopword=not args.no_stopword,
-        stem=not args.no_stem,
+        casefold=casefold_opt,
+        stopword=stopword_opt,
+        stem=stem_opt,
+        lemma=lemma_opt,
     )
 
     if args.flush_every:
@@ -118,9 +123,10 @@ def run_build(args: argparse.Namespace) -> None:
     t_write_start = time.time()
     writer = IndexWriter(out_dir)
     config = {
-        "casefold": True,
-        "stopword": not args.no_stopword,
-        "stem": not args.no_stem,
+        "casefold": casefold_opt,
+        "stopword": stopword_opt,
+        "stem": stem_opt,
+        "lemma": lemma_opt,
     }
     writer.write_all(indexer, config=config)
     t_write = time.time() - t_write_start
@@ -181,6 +187,7 @@ def run_query(args: argparse.Namespace) -> None:
         casefold=prep_config.get("casefold", True),
         stopword=prep_config.get("stopword", True),
         stem=prep_config.get("stem", True),
+        lemma=prep_config.get("lemma", False),
     )
 
     raw_query_terms = args.terms
@@ -383,10 +390,16 @@ def run_eval_skips(args: argparse.Namespace) -> None:
         sys.exit(1)
 
     print(f"正在全記憶體模式下建立索引以供 Skip 評測 (limit: {args.limit})...")
+    casefold_opt = not getattr(args, "no_casefold", False)
+    stopword_opt = not args.no_stopword
+    stem_opt = not args.no_stem and not getattr(args, "lemma", False)
+    lemma_opt = bool(getattr(args, "lemma", False))
+
     preprocessor = Preprocessor(
-        casefold=True,
-        stopword=not args.no_stopword,
-        stem=not args.no_stem,
+        casefold=casefold_opt,
+        stopword=stopword_opt,
+        stem=stem_opt,
+        lemma=lemma_opt,
     )
     indexer = Indexer(spimi=False).build(str(warc_path), preprocessor, limit=args.limit)
     report_path = Path(args.output_report)
@@ -413,8 +426,10 @@ def build_parser() -> argparse.ArgumentParser:
     p_build.add_argument("--mode", choices=["memory", "spimi"], default="memory", help="建置模式 (預設: memory)")
     p_build.add_argument("--block-size-mb", type=int, default=150, help="SPIMI 區塊記憶體大小門檻 MB (預設: 150)")
     p_build.add_argument("--flush-every", type=int, default=None, help="SPIMI 累積位置數門檻 (若指定則覆蓋 block-size-mb)")
+    p_build.add_argument("--no-casefold", action="store_true", help="關閉英文字母大小寫折疊 (Case folding)")
+    p_build.add_argument("--no-stopword", action="store_true", help="關閉停用詞過濾 (Stopword removal)")
     p_build.add_argument("--no-stem", action="store_true", help="關閉 Porter Stemmer 字幹提取")
-    p_build.add_argument("--no-stopword", action="store_true", help="關閉停用詞過濾")
+    p_build.add_argument("--lemma", action="store_true", help="啟用 WordNet Lemmatization（取代 Stemmer）")
     p_build.add_argument("--eval-skips", action="store_true", help="建置完成後自動執行 M5 Skip Pointer 評測 (僅限 memory 模式)")
 
     # 2. query 子命令
@@ -429,8 +444,10 @@ def build_parser() -> argparse.ArgumentParser:
     p_eval.add_argument("--input", default="HW1/dataset/04.warc", help="WARC 語料路徑 (預設: HW1/dataset/04.warc)")
     p_eval.add_argument("--limit", type=int, default=1000, help="評測取樣文件篇數 (預設: 1000)")
     p_eval.add_argument("--output-report", default="HW1/logs/skip_eval_report.md", help="評測報告輸出 Markdown 路徑")
+    p_eval.add_argument("--no-casefold", action="store_true", help="關閉英文字母大小寫折疊 (Case folding)")
+    p_eval.add_argument("--no-stopword", action="store_true", help="關閉停用詞過濾 (Stopword removal)")
     p_eval.add_argument("--no-stem", action="store_true", help="關閉 Porter Stemmer 字幹提取")
-    p_eval.add_argument("--no-stopword", action="store_true", help="關閉停用詞過濾")
+    p_eval.add_argument("--lemma", action="store_true", help="啟用 WordNet Lemmatization（取代 Stemmer）")
 
     return parser
 

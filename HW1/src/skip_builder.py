@@ -42,15 +42,13 @@ class SkipPointer:
 class PostingWithSkip:
     """帶有 Skip Pointer 的 Posting 結構。
 
-    positions 欄位直接引用 M3 Posting.positions (array('I'))，避免千萬筆 posting 重複複製。
+    已將 positions 欄位移除以節省記憶體，僅保留布林檢索所需的 doc_num 與 skip 指標。
     """
     doc_num: int
-    tf: int
-    positions: array
     skip: SkipPointer | None = None
 
 
-def build_skip_list(postings: list[Posting]) -> list[PostingWithSkip]:
+def build_skip_list(postings: list[Any]) -> list[PostingWithSkip]:
     """為單一 postings list 建立 Skip Pointer。
 
     間隔規則：
@@ -66,10 +64,10 @@ def build_skip_list(postings: list[Posting]) -> list[PostingWithSkip]:
     """
     p_len = len(postings)
     if p_len < MIN_SKIP_LEN:
-        return [PostingWithSkip(p.doc_num, p.tf, p.positions, None) for p in postings]
+        return [PostingWithSkip(p.doc_num, None) for p in postings]
 
     interval = math.isqrt(p_len)
-    result = [PostingWithSkip(p.doc_num, p.tf, p.positions, None) for p in postings]
+    result = [PostingWithSkip(p.doc_num, None) for p in postings]
 
     for i in range(0, p_len, interval):
         target_idx = i + interval
@@ -179,8 +177,9 @@ def intersect_with_skips(
 ) -> tuple[list[int], int]:
     """使用 Skip Pointer 的交集演算法（採用 Manning IIR Fig. 2.10 連續跳躍標準）。
 
-    比較次數準則：僅計算主迴圈當前 doc_num 數值比對（每次 outer while 計 1 次）。
-    skip 跳躍屬指標導引，不額外累加，確保 skip 比較次數嚴格 <= basic。
+    比較次數準則：
+      1. 外層迴圈當前文件比對（d1 == d2, d1 < d2）：計 1 次比對。
+      2. Skip 條件判定：每次評估 skip.target_doc_num <= target 時，計 1 次數值比較。
 
     Args:
         p1: 第一個 PostingWithSkip 串列
@@ -206,18 +205,26 @@ def intersect_with_skips(
             i += 1
             j += 1
         elif d1 < d2:
-            skip = p1[i].skip
-            if skip is not None and skip.target_doc_num <= d2:
-                while p1[i].skip is not None and p1[i].skip.target_doc_num <= d2:
+            has_skipped = False
+            while p1[i].skip is not None:
+                n_comparisons += 1
+                if p1[i].skip.target_doc_num <= d2:
                     i = p1[i].skip.target_index
-            else:
+                    has_skipped = True
+                else:
+                    break
+            if not has_skipped:
                 i += 1
         else:
-            skip = p2[j].skip
-            if skip is not None and skip.target_doc_num <= d1:
-                while p2[j].skip is not None and p2[j].skip.target_doc_num <= d1:
+            has_skipped = False
+            while p2[j].skip is not None:
+                n_comparisons += 1
+                if p2[j].skip.target_doc_num <= d1:
                     j = p2[j].skip.target_index
-            else:
+                    has_skipped = True
+                else:
+                    break
+            if not has_skipped:
                 j += 1
 
     return result, n_comparisons
