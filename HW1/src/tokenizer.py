@@ -68,22 +68,39 @@ def load_stopwords():
         return set(stopwords.words("english"))
 
 
+def load_lemmatizer():
+    try:
+        from nltk.stem import WordNetLemmatizer
+        lemmatizer = WordNetLemmatizer()
+        lemmatizer.lemmatize("test")
+        return lemmatizer
+    except LookupError:
+        nltk.download("wordnet", quiet=True)
+        nltk.download("omw-1.4", quiet=True)
+        from nltk.stem import WordNetLemmatizer
+        return WordNetLemmatizer()
+
+
 class Preprocessor:
-    def __init__(self, casefold=True, stopword=False, stem=False):
+    def __init__(self, casefold: bool = True, stopword: bool = False, stem: bool = False, lemma: bool = False):
         self.casefold = casefold
         self.stopword = stopword
         self.stem = stem
+        self.lemma = lemma
         self.stops = load_stopwords() if stopword else set()
         self.stemmer = PorterStemmer() if stem else None
+        self.lemmatizer = load_lemmatizer() if lemma else None
 
-    def process(self, text):
+    def process(self, text: str):
         res = []
         for pos, tok in enumerate(tokenize(text), start=1):
             if self.casefold:
                 tok = tok.casefold()
             if self.stopword and tok.casefold() in self.stops:
                 continue
-            if self.stem and tok.isalpha():
+            if self.lemma and tok.isalpha():
+                tok = self.lemmatizer.lemmatize(tok)
+            elif self.stem and tok.isalpha():
                 tok = self.stemmer.stem(tok, to_lowercase=self.casefold)
             res.append((pos, tok))
         return res
