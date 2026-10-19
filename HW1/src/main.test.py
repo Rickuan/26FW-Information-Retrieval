@@ -54,107 +54,101 @@ def test_cli_parsing():
 
     # 1.2 build --help
     res_build = run_cli("build", "--help")
-    check("build --help 包含必要選項", all(opt in res_build.stdout for opt in ["--input", "--output", "--mode", "--limit"]))
+    check("build --help 包含必要選項", all(opt in res_build.stdout for opt in ["--mode", "--limit"]))
 
     # 1.3 query --help
     res_query = run_cli("query", "--help")
     check("query --help 包含 terms 與 options", "terms" in res_query.stdout and "--show-docs" in res_query.stdout)
 
-    # 1.4 非法檔案路徑
-    res_err = run_cli("build", "--input", "nonexistent_file.warc")
-    check("非法 WARC 路徑優雅報錯（回傳 1）", res_err.returncode == 1)
-    check("錯誤訊息友善無 Python Traceback", "錯誤：找不到輸入語料檔案" in res_err.stderr and "Traceback" not in res_err.stderr)
+    # 1.4 多 WARC 檔案防呆
+    dummy_warc = Path("HW1/dataset/test_dummy_extra.warc")
+    dummy_warc.touch()
+    try:
+        res_err = run_cli("build")
+        check("多 WARC 檔案防呆報錯（回傳 1）", res_err.returncode == 1)
+        check("錯誤訊息友善無 Python Traceback", "找到多個 WARC 檔案" in res_err.stderr and "Traceback" not in res_err.stderr)
+    finally:
+        if dummy_warc.exists():
+            dummy_warc.unlink()
 
 
 def test_build_and_outputs():
     print("\n=== Part 2: build 端到端索引建置與產物驗證 ===")
-    tmp_out = Path(tempfile.mkdtemp(prefix="ir_test_build_"))
-    try:
-        # 2.1 全記憶體模式建置 (limit 100)
-        res = run_cli("build", "--limit", "100", "--output", str(tmp_out))
-        check("build (memory, limit=100) 成功執行", res.returncode == 0, f"code={res.returncode}")
-        check("終端輸出包含摘要日誌 (Summary)", "索引建置完成摘要" in res.stdout and "Peak RSS" in res.stdout)
+    out_dir = Path("HW1/output")
+    out_dir.mkdir(parents=True, exist_ok=True)
+    # 2.1 全記憶體模式建置 (limit 100)
+    res = run_cli("build", "--limit", "100")
+    check("build (memory, limit=100) 成功執行", res.returncode == 0, f"code={res.returncode}")
+    check("終端輸出包含摘要日誌 (Summary)", "索引建置完成摘要" in res.stdout and "Peak RSS" in res.stdout)
 
-        # 2.2 驗證 6 項產物存在且大小非空
-        expected_files = [
-            "dictionary.txt",
-            "postings.txt",
-            "metadata.json",
-            "doc_map.json",
-            "lexicon.tsv",
-            "postings.bin",
-        ]
-        for fname in expected_files:
-            fpath = tmp_out / fname
-            check(f"產物存在：{fname}", fpath.is_file() and fpath.stat().st_size > 0)
+    # 2.2 驗證 6 項產物存在且大小非空
+    expected_files = [
+        "dictionary.txt",
+        "postings.txt",
+        "metadata.json",
+        "doc_map.json",
+        "lexicon.tsv",
+        "postings.bin",
+    ]
+    for fname in expected_files:
+        fpath = out_dir / fname
+        check(f"產物存在：{fname}", fpath.is_file() and fpath.stat().st_size > 0)
 
-        # 2.3 檢查 metadata.json
-        with (tmp_out / "metadata.json").open("r", encoding="utf-8") as f:
-            meta = json.load(f)
-        check("metadata.json 包含 N == 100", meta.get("N") == 100)
-        check("metadata.json 包含 vocab_size > 0", meta.get("vocab_size", 0) > 0)
-        check("metadata.json 包含 preprocessor 配置", "stem" in meta.get("preprocessor", {}))
+    # 2.3 檢查 metadata.json
+    with (out_dir / "metadata.json").open("r", encoding="utf-8") as f:
+        meta = json.load(f)
+    check("metadata.json 包含 N == 100", meta.get("N") == 100)
+    check("metadata.json 包含 vocab_size > 0", meta.get("vocab_size", 0) > 0)
+    check("metadata.json 包含 preprocessor 配置", "stem" in meta.get("preprocessor", {}))
 
-        # 2.4 檢查 dictionary.txt 與 postings.txt 行數對齊
-        with (tmp_out / "dictionary.txt").open("r", encoding="utf-8") as f:
-            n_dict = sum(1 for _ in f)
-        with (tmp_out / "postings.txt").open("r", encoding="utf-8") as f:
-            n_post = sum(1 for _ in f)
-        check("dictionary 行數 == postings 行數 == vocab_size", n_dict == n_post == meta["vocab_size"])
-
-    finally:
-        shutil.rmtree(tmp_out, ignore_errors=True)
+    # 2.4 檢查 dictionary.txt 與 postings.txt 行數對齊
+    with (out_dir / "dictionary.txt").open("r", encoding="utf-8") as f:
+        n_dict = sum(1 for _ in f)
+    with (out_dir / "postings.txt").open("r", encoding="utf-8") as f:
+        n_post = sum(1 for _ in f)
+    check("dictionary 行數 == postings 行數 == vocab_size", n_dict == n_post == meta["vocab_size"])
 
 
 def test_spimi_build():
     print("\n=== Part 3: SPIMI 外排序分塊模式建置驗證 ===")
-    tmp_spimi = Path(tempfile.mkdtemp(prefix="ir_test_spimi_"))
-    try:
-        # 故意設定極小 block-size-mb 觸發多次分塊 flush 與多路歸併
-        res = run_cli("build", "--limit", "100", "--mode", "spimi", "--block-size-mb", "1", "--output", str(tmp_spimi))
-        check("build (spimi, limit=100) 成功執行", res.returncode == 0)
-        check("輸出包含多路歸併日誌", "多路歸併" in res.stdout)
+    out_dir = Path("HW1/output")
+    # 故意設定極小 block-size-mb 觸發多次分塊 flush 與多路歸併
+    res = run_cli("build", "--limit", "100", "--mode", "spimi", "--block-size-mb", "1")
+    check("build (spimi, limit=100) 成功執行", res.returncode == 0)
+    check("輸出包含多路歸併日誌", "多路歸併" in res.stdout)
 
-        for fname in ["dictionary.txt", "postings.txt", "metadata.json", "doc_map.json", "lexicon.tsv", "postings.bin"]:
-            fpath = tmp_spimi / fname
-            check(f"SPIMI 產物存在：{fname}", fpath.is_file() and fpath.stat().st_size > 0)
-
-    finally:
-        shutil.rmtree(tmp_spimi, ignore_errors=True)
+    for fname in ["dictionary.txt", "postings.txt", "metadata.json", "doc_map.json", "lexicon.tsv", "postings.bin"]:
+        fpath = out_dir / fname
+        check(f"SPIMI 產物存在：{fname}", fpath.is_file() and fpath.stat().st_size > 0)
 
 
 def test_query_command():
     print("\n=== Part 4: query 磁碟索引檢索驗證 ===")
-    tmp_out = Path(tempfile.mkdtemp(prefix="ir_test_query_"))
-    try:
-        # 先建置小索引供查詢
-        run_cli("build", "--limit", "100", "--output", str(tmp_out))
+    # 先建置小索引供查詢
+    run_cli("build", "--limit", "100")
 
-        # 4.1 雙詞 AND 查詢 (預設 Skip)
-        res_skip = run_cli("query", "game", "play", "--index-dir", str(tmp_out), "--show-docs", "5")
-        check("query 雙詞成功回傳", res_skip.returncode == 0)
-        check("使用 Skip Pointer 比對模式", "檢索結果 (Skip Pointer)" in res_skip.stdout)
-        check("輸出前 K 篇文件表格", "TREC ID" in res_skip.stdout and "URL" in res_skip.stdout)
+    # 4.1 雙詞 AND 查詢 (預設 Skip)
+    res_skip = run_cli("query", "game", "play", "--show-docs", "5")
+    check("query 雙詞成功回傳", res_skip.returncode == 0)
+    check("使用 Skip Pointer 比對模式", "檢索結果 (Skip Pointer)" in res_skip.stdout)
+    check("輸出前 K 篇文件表格", "TREC ID" in res_skip.stdout and "URL" in res_skip.stdout)
 
-        # 4.2 雙詞 AND 查詢 (--no-skips)
-        res_basic = run_cli("query", "game", "play", "--index-dir", str(tmp_out), "--no-skips")
-        check("query --no-skips 成功執行", res_basic.returncode == 0)
-        check("使用 Basic Linear Scan 比對模式", "檢索結果 (Basic Linear Scan)" in res_basic.stdout)
+    # 4.2 雙詞 AND 查詢 (--no-skips)
+    res_basic = run_cli("query", "game", "play", "--no-skips")
+    check("query --no-skips 成功執行", res_basic.returncode == 0)
+    check("使用 Basic Linear Scan 比對模式", "檢索結果 (Basic Linear Scan)" in res_basic.stdout)
 
-        # 4.3 多詞 AND 查詢 (3 詞)
-        res_multi = run_cli("query", "game", "play", "home", "--index-dir", str(tmp_out))
-        check("query 3 詞成功回傳", res_multi.returncode == 0)
+    # 4.3 多詞 AND 查詢 (3 詞)
+    res_multi = run_cli("query", "game", "play", "home")
+    check("query 3 詞成功回傳", res_multi.returncode == 0)
 
-        # 4.4 停用詞查詢防呆
-        res_stop = run_cli("query", "the", "game", "--index-dir", str(tmp_out))
-        check("停用詞自動提示並回傳 0 篇", "停用詞" in res_stop.stdout and "匹配文件數：0 篇" in res_stop.stdout)
+    # 4.4 停用詞查詢防呆
+    res_stop = run_cli("query", "the", "game")
+    check("停用詞自動提示並回傳 0 篇", "停用詞" in res_stop.stdout and "匹配文件數：0 篇" in res_stop.stdout)
 
-        # 4.5 不存在詞彙防呆
-        res_none = run_cli("query", "nonexistent123xyz", "game", "--index-dir", str(tmp_out))
-        check("未登錄詞彙自動提示並回傳 0 篇", "不存在於索引中" in res_none.stdout and "匹配文件數：0 篇" in res_none.stdout)
-
-    finally:
-        shutil.rmtree(tmp_out, ignore_errors=True)
+    # 4.5 不存在詞彙防呆
+    res_none = run_cli("query", "nonexistent123xyz", "game")
+    check("未登錄詞彙自動提示並回傳 0 篇", "不存在於索引中" in res_none.stdout and "匹配文件數：0 篇" in res_none.stdout)
 
 
 def test_eval_skips_command():

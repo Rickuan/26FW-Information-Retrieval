@@ -6,7 +6,7 @@
   3. eval-skips：M5 Skip Pointer 效能評測與報告產出
 
 用法範例：
-  uv run python HW1/src/main.py build --input HW1/dataset/04.warc --output HW1/output/ --limit 1000
+  uv run python HW1/src/main.py build --limit 1000
   uv run python HW1/src/main.py build --mode spimi --block-size-mb 100
   uv run python HW1/src/main.py query "information" "retrieval" --show-docs 5
   uv run python HW1/src/main.py eval-skips --limit 1000
@@ -49,14 +49,42 @@ def get_peak_rss_mb() -> float:
 # Step 6-B: build 子命令
 # ---------------------------------------------------------------------------
 
-def run_build(args: argparse.Namespace) -> None:
-    """執行端到端索引建置流程。"""
-    warc_path = Path(args.input)
-    if not warc_path.is_file():
-        print(f"錯誤：找不到輸入語料檔案 '{warc_path}'", file=sys.stderr)
+def resolve_warc_input() -> Path:
+    """自動搜尋 HW1/dataset/*.warc 語料檔案。
+
+    - 若剛好有 1 個 .warc 檔案，直接使用該檔案。
+    - 若有多個 .warc 檔案，報錯提醒使用者注意輸入檔案數量及位置。
+    - 若無任何 .warc 檔案，報錯提醒使用者確認語料放置位置。
+    """
+    dataset_dir = Path("HW1/dataset")
+    if not dataset_dir.is_dir():
+        print(f"錯誤：找不到目錄 '{dataset_dir}'，請確認專案目錄結構。", file=sys.stderr)
         sys.exit(1)
 
-    out_dir = Path(args.output)
+    warc_files = sorted(dataset_dir.glob("*.warc"))
+    if not warc_files:
+        print(f"錯誤：找不到輸入語料檔案，在 '{dataset_dir}' 目錄下找不到任何 .warc 檔案，請確認語料放置位置。", file=sys.stderr)
+        sys.exit(1)
+
+    if len(warc_files) > 1:
+        names = [f.name for f in warc_files]
+        print(
+            f"錯誤：在 '{dataset_dir}' 目錄下找到多個 WARC 檔案 {names}！\n"
+            f"請注意輸入檔案數量及位置，目錄下僅能保留 1 個 .warc 語料檔案。",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+
+    selected = warc_files[0]
+    print(f"💡 [Dataset] 自動偵測到語料檔案：{selected}")
+    return selected
+
+
+def run_build(args: argparse.Namespace) -> None:
+    """執行端到端索引建置流程。"""
+    warc_path = resolve_warc_input()
+
+    out_dir = Path("HW1/output")
     out_dir.mkdir(parents=True, exist_ok=True)
 
     print("=" * 70)
@@ -384,10 +412,7 @@ def run_eval_skips_on_indexer(indexer: Indexer, preprocessor: Preprocessor, repo
 
 def run_eval_skips(args: argparse.Namespace) -> None:
     """獨立執行 eval-skips 子命令。"""
-    warc_path = Path(args.input)
-    if not warc_path.is_file():
-        print(f"錯誤：找不到輸入語料檔案 '{warc_path}'", file=sys.stderr)
-        sys.exit(1)
+    warc_path = resolve_warc_input()
 
     print(f"正在全記憶體模式下建立索引以供 Skip 評測 (limit: {args.limit})...")
     casefold_opt = not getattr(args, "no_casefold", False)
@@ -420,8 +445,6 @@ def build_parser() -> argparse.ArgumentParser:
 
     # 1. build 子命令
     p_build = subparsers.add_parser("build", help="端到端全流程索引建置")
-    p_build.add_argument("--input", default="HW1/dataset/04.warc", help="WARC 語料路徑 (預設: HW1/dataset/04.warc)")
-    p_build.add_argument("--output", default="HW1/output", help="索引產物輸出目錄 (預設: HW1/output)")
     p_build.add_argument("--limit", type=int, default=None, help="處理最大文件篇數 (預設: 全量)")
     p_build.add_argument("--mode", choices=["memory", "spimi"], default="memory", help="建置模式 (預設: memory)")
     p_build.add_argument("--block-size-mb", type=int, default=150, help="SPIMI 區塊記憶體大小門檻 MB (預設: 150)")
@@ -441,7 +464,6 @@ def build_parser() -> argparse.ArgumentParser:
 
     # 3. eval-skips 子命令
     p_eval = subparsers.add_parser("eval-skips", help="獨立執行 M5 Skip Pointer 評測並產出報告")
-    p_eval.add_argument("--input", default="HW1/dataset/04.warc", help="WARC 語料路徑 (預設: HW1/dataset/04.warc)")
     p_eval.add_argument("--limit", type=int, default=1000, help="評測取樣文件篇數 (預設: 1000)")
     p_eval.add_argument("--output-report", default="HW1/logs/skip_eval_report.md", help="評測報告輸出 Markdown 路徑")
     p_eval.add_argument("--no-casefold", action="store_true", help="關閉英文字母大小寫折疊 (Case folding)")
