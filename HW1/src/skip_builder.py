@@ -177,8 +177,9 @@ def intersect_with_skips(
 ) -> tuple[list[int], int]:
     """使用 Skip Pointer 的交集演算法（採用 Manning IIR Fig. 2.10 連續跳躍標準）。
 
-    比較次數準則：僅計算主迴圈當前 doc_num 數值比對（每次 outer while 計 1 次）。
-    skip 跳躍屬指標導引，不額外累加，確保 skip 比較次數嚴格 <= basic。
+    比較次數準則：
+      1. 外層迴圈當前文件比對（d1 == d2, d1 < d2）：計 1 次比對。
+      2. Skip 條件判定：每次評估 skip.target_doc_num <= target 時，計 1 次數值比較。
 
     Args:
         p1: 第一個 PostingWithSkip 串列
@@ -204,18 +205,26 @@ def intersect_with_skips(
             i += 1
             j += 1
         elif d1 < d2:
-            skip = p1[i].skip
-            if skip is not None and skip.target_doc_num <= d2:
-                while p1[i].skip is not None and p1[i].skip.target_doc_num <= d2:
+            has_skipped = False
+            while p1[i].skip is not None:
+                n_comparisons += 1
+                if p1[i].skip.target_doc_num <= d2:
                     i = p1[i].skip.target_index
-            else:
+                    has_skipped = True
+                else:
+                    break
+            if not has_skipped:
                 i += 1
         else:
-            skip = p2[j].skip
-            if skip is not None and skip.target_doc_num <= d1:
-                while p2[j].skip is not None and p2[j].skip.target_doc_num <= d1:
+            has_skipped = False
+            while p2[j].skip is not None:
+                n_comparisons += 1
+                if p2[j].skip.target_doc_num <= d1:
                     j = p2[j].skip.target_index
-            else:
+                    has_skipped = True
+                else:
+                    break
+            if not has_skipped:
                 j += 1
 
     return result, n_comparisons
