@@ -233,3 +233,6 @@ __marimo__/
 
 spimi_tmp/
 spimi_test_tmp/
+
+# Output directories
+output/
