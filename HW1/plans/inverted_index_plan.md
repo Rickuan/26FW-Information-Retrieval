@@ -21,7 +21,7 @@
 | M3 | Inverted Indexer (SPIMI) | `indexer.py` | ✅ 完成 | `.done.module_3_indexer_plan.md` |
 | M4 | Index Writer & Reader | `writer.py` | ✅ 完成 | `.done.module_4_writer_plan.md` |
 | M5 | Skip Builder & AND Query | `skip_builder.py` | ✅ 完成 | `.done.module_5_skip_builder_plan.md` |
-| Step 6 | Integration Pipeline & User Slice | `main.py` | ⬜ 待實作 | `user_slice_plan.md` |
+| Step 6 | Integration Pipeline & User Slice | `main.py` | ✅ 完成 | `.done.user_slice_plan.md` |
 
 ---
 
@@ -55,7 +55,7 @@
 - `intersect_with_skips(p1, p2)` → `(doc_nums, n_comparisons)`
 - 效能評測：5 組 query pair 與線性掃描比較次數及加速比
 
-### Step 6：User Slice / CLI 入口（⬜ 待實作）
+### Step 6：User Slice / CLI 入口（✅ 已完成）
 - `HW1/src/main.py` 整合統一 CLI 入口
 - `build`：一鍵執行 M1~M4 端到端流程，自動生成 6 個評分檔案
 - `query`：命令列布林 AND 查詢展示（結合 `IndexReader`）
@@ -73,14 +73,15 @@ HW1/
 │   ├── .done.module_3_indexer_plan.md
 │   ├── .done.module_4_writer_plan.md
 │   ├── .done.module_5_skip_builder_plan.md
-│   └── user_slice_plan.md
+│   └── .done.user_slice_plan.md
 ├── src/
 │   ├── warc.py / extract.py / documents.py   # M1
 │   ├── tokenizer.py                           # M2
 │   ├── indexer.py                             # M3
 │   ├── writer.py                              # M4
 │   ├── skip_builder.py                        # M5
-│   └── main.py                                # Step 6 (User Slice)
+│   ├── main.py                                # Step 6 (User Slice)
+│   └── main.test.py                           # Step 6 測試套件
 ├── output/                  # 索引輸出（.gitignore）
 └── logs/                    # 執行日誌與評測報告
 ```
@@ -95,7 +96,7 @@ HW1/
 | Phase 3 | M3 Indexer + SPIMI | `indexer.py`, `indexer.test.py` | ✅ 完成 |
 | Phase 4 | M4 Text & Binary Writer + Reader | `writer.py`, `writer.test.py` | ✅ 完成 |
 | Phase 5 | M5 Skip Builder + AND query | `skip_builder.py`, `skip_builder.test.py` | ✅ 完成 |
-| Phase 6 | Step 6 User Slice CLI + 全量整合測試 | `main.py`, `output/*`, 評測報表 | ⬜ 待實作 |
+| Phase 6 | Step 6 User Slice CLI + 全量整合測試 | `main.py`, `output/*`, 評測報表 | ✅ 完成 |
 
 ---
 
