@@ -42,15 +42,13 @@ class SkipPointer:
 class PostingWithSkip:
     """帶有 Skip Pointer 的 Posting 結構。
 
-    positions 欄位直接引用 M3 Posting.positions (array('I'))，避免千萬筆 posting 重複複製。
+    已將 positions 欄位移除以節省記憶體，僅保留布林檢索所需的 doc_num 與 skip 指標。
     """
     doc_num: int
-    tf: int
-    positions: array
     skip: SkipPointer | None = None
 
 
-def build_skip_list(postings: list[Posting]) -> list[PostingWithSkip]:
+def build_skip_list(postings: list[Any]) -> list[PostingWithSkip]:
     """為單一 postings list 建立 Skip Pointer。
 
     間隔規則：
@@ -66,10 +64,10 @@ def build_skip_list(postings: list[Posting]) -> list[PostingWithSkip]:
     """
     p_len = len(postings)
     if p_len < MIN_SKIP_LEN:
-        return [PostingWithSkip(p.doc_num, p.tf, p.positions, None) for p in postings]
+        return [PostingWithSkip(p.doc_num, None) for p in postings]
 
     interval = math.isqrt(p_len)
-    result = [PostingWithSkip(p.doc_num, p.tf, p.positions, None) for p in postings]
+    result = [PostingWithSkip(p.doc_num, None) for p in postings]
 
     for i in range(0, p_len, interval):
         target_idx = i + interval

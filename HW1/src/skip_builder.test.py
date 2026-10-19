@@ -99,10 +99,10 @@ def test_unit_build_skip_list():
                 assert p.skip.target_index == target_idx
                 assert p.skip.target_doc_num == plist[target_idx].doc_num
 
-    # 5. 記憶體優化 AC：positions 物件未複製（identity check）
+    # 5. 記憶體優化 AC：positions 已移除以節省記憶體
     p_orig = [Posting(doc_num=1, tf=2, positions=array("I", [10, 20]))]
     res_orig = build_skip_list(p_orig)
-    check("positions 引用原始 array，未產生新物件 (is 運算子)", res_orig[0].positions is p_orig[0].positions)
+    check("PostingWithSkip 不儲存 positions 欄位以節省記憶體", not hasattr(res_orig[0], "positions"))
 
 
 def test_unit_intersection():
@@ -137,7 +137,7 @@ def test_unit_intersection():
     check("長短串列：交集結果一致", docs_basic == docs_skip == [500, 1500])
     check("長短串列：skip 比較次數大幅低於 basic", comp_skip < comp_basic * 0.2, f"skip={comp_skip}, basic={comp_basic} (省去 {(1 - comp_skip/comp_basic)*100:.1f}%)")
 
-    # d. 隨機隨機取樣 20 組驗證正確性與比較次數保證
+    # d. 隨機取樣 20 組驗證正確性
     for seed in range(20):
         rng = random.Random(seed)
         set1 = sorted(rng.sample(range(1000), rng.randint(10, 200)))
