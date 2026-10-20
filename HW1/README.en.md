@@ -52,15 +52,16 @@ uv run python HW1/src/main.py query "information" "retrieval" --show-docs 5
 
 - **Large-Scale Corpus Support & Low-Memory Architecture**:
   - **Columnar Arrays**: Inverted postings are stored using contiguous `array('I')`, reducing peak memory usage from 3.7 GB to 1.1 GB (a 70% memory reduction).
-  - **SPIMI External Merge Sort**: Features automatic memory-threshold-based block splitting and multi-way streaming merge, stably completing full builds under a strict 604 MB memory limit.
+  - **SPIMI External Merge Sort**: Flushes a sorted block to disk whenever the buffered position count reaches a threshold (default 3,000,000 positions), then merges all blocks with a streaming multi-way merge. Peak RSS on the full corpus is 604 MB (10 blocks, merge 6 s).
 - **Ultra-Low Storage Overhead & Compression**:
-  - **VByte + Delta Gap (d-gap)**: Compresses binary postings from 177+ MB down to 62.97 MB (compression ratio: 35.5%, saving 64.5% storage space).
+  - **VByte + Delta Gap (d-gap)**: Encodes postings with d-gaps and VByte: `postings.txt` 221.3 MB → `postings.bin` 63.0 MB (28.5%) on the full corpus with default settings.
   - **Random Seek**: Enables rapid retrieval based on byte offsets in `lexicon.tsv`, executing 1,000 random term lookups in just 0.03 seconds.
 - **Skip Pointer Query Acceleration**:
-  - Dynamically calculates skip intervals $L = \lfloor\sqrt{P}\rfloor$ (for $P \ge 9$), reducing comparison operations by 94.8% for unbalanced postings lists (achieving a 19.14x speedup), while smoothly falling back to linear comparison during dense intersections.
+  - Dynamically calculates skip intervals $L = \lfloor\sqrt{P}\rfloor$ (for $P \ge 9$), reducing comparison operations by 94.8% for unbalanced postings lists (19.1× fewer comparisons), while smoothly falling back to linear comparison during dense intersections.
 - **Text Preprocessing Pipeline**:
   - **Character Sanitization**: Replaces invisible and control characters with whitespace; normalizes various quote encodings to standard ASCII single quote `'`.
   - **Semantic Preservation & Fine-Grained Tokenization**: Preserves negation suffixes (`n't`); aggregates acronyms by stripping periods (`U.S.A.` $\to$ `USA`); fully retains domain names and email addresses; intelligently splits slash-separated compounds (`client/server`); trims leading/trailing non-alphanumeric noise; strips clitics (`'s`, `'ve`, etc.); enforces `MAX_LEN = 64` to eliminate meaningless excessively long tokens.
+  - **Stopword filtering happens before stemming.** A non-stopword can therefore stem to a stopword, so 105 stopword entries still appear in the stop+stem dictionary, e.g. `thes` → `the` (df 214, vs. 31,836 without stopword removal). The largest cases come from content words such as `other` (df 3,298), `own` (df 1,204) and `will` (df 1,136), so we deliberately do not filter again after stemming.
   - **Morphology & Position Fidelity**: Tracks absolute token positions; strictly maintains monotonically increasing position indices during stopword removal (e.g., in "lord of the rings", "lord" is pos 1 and "rings" is pos 4) to preserve true word distances for accurate phrase queries; enforces thorough case folding; applies stemming and lemmatization exclusively to purely alphabetic tokens.
 - **Auxiliary Prefix Search & Multiple Artifact Formats**:
   - **Radix Trie Prefix Search**: Delivers ultra-fast prefix search across tens of thousands of terms in 0.01 seconds.
@@ -70,19 +71,27 @@ uv run python HW1/src/main.py query "information" "retrieval" --show-docs 5
 
 ## 5. Core Experiments & Ablation Studies
 
-### Experiment 1: Preprocessing Ablation Study (First 5,000 Documents Benchmark)
+### Experiment 1: Preprocessing Ablation (first 5,000 documents)
 
-| Experimental Group | Parameter Settings | Vocab Size ($Vocab$) | Total Tokens | Index Size (`postings.bin`) | Impact & Benefit Analysis |
-|---|---|---|---|---|---|
-| **Baseline Control** | **Default (All Enabled)** | **94,820** | **2,410,812** | **6.81 MB** | **Optimal configuration (most compact vocabulary and lowest storage overhead)** |
-| Disable Case Folding | `--no-casefold` | 124,310 (+31.1%) | 2,410,812 | 7.92 MB (+16.3%) | Case variations unmerged, leading to significant dictionary bloat |
-| Disable Stopwords | `--no-stopword` | 94,999 (+0.2%) | 3,921,405 (+62.7%) | 11.95 MB (+75.5%) | High-frequency function words indexed, causing postings size to surge by 75.5% |
-| Disable Stemming | `--no-stem` | 124,131 (+30.9%) | 2,410,812 | 7.92 MB (+16.3%) | Inflected forms not conflated (e.g., `retrieval` vs. `retrieving`) |
-| Enable Lemmatization | `--lemma` | 108,450 (+14.4%) | 2,410,812 | 7.35 MB (+7.9%) | Preserves semantic word forms without stem distortion; vocabulary size sits between baseline and unstemmed |
+Baseline is the `main.py build` default (case folding + stopword removal + Porter stemming).
+All counts are deterministic for a given code version; percentages are relative to the baseline.
+
+| Setting | Flags | Vocab | Tokens | `postings.bin` |
+|---|---|---|---|---|
+| **Baseline** | (default) | **160,979** | **2,887,106** | **10.14 MB** |
+| No case folding | `--no-casefold` | 186,458 (+15.8%) | 2,887,106 | 10.65 MB (+5.1%) |
+| No stopword removal | `--no-stopword` | 161,051 (+0.04%) | 4,382,100 (+51.8%) | 12.70 MB (+25.3%) |
+| No stemming | `--no-stem` | 189,123 (+17.5%) | 2,887,106 | 10.75 MB (+6.1%) |
+| Lemmatization instead of stemming | `--lemma` | 181,353 (+12.7%) | 2,887,106 | 10.50 MB (+3.6%) |
+
+- Stopwords add only 72 vocabulary entries but account for 34.1% of all tokens, so removing them mainly shrinks the postings, not the dictionary.
+- Compared with no word-form normalization (`--no-stem`, 189,123 terms), Porter stemming reduces the vocabulary by 14.9%, while WordNet lemmatization reduces it by only 4.1%, since the lemmatizer without POS tags only normalizes nouns.
+- Case folding, stemming and lemmatization only merge word forms and never change the token count.
+- These numbers compare index size only. Without queries and relevance judgments, they do not show which setting retrieves better.
 
 ### Experiment 2: Skip Pointer Query Acceleration Comparison (Full 34,786 Documents)
 
-| Test Scenario | Query Terms (q1 AND q2) | Basic Comparisons | Skip Comparisons | Comparison Reduction (%) | Speedup Ratio |
+| Test Scenario | Query Terms (q1 AND q2) | Basic Comparisons | Skip Comparisons | Comparison Reduction (%) | Comparison ratio |
 |---|---|---|---|---|---|
 | **Unbalanced Lists (Vastly Different Lengths)** | `home` AND `hallyday` | 19,145 | **1,000** | **-94.8%** | **19.14x** |
 | **Typical Co-occurring Terms** | `game` AND `play` | 9,225 | **8,399** | **-9.0%** | **1.10x** |
@@ -95,7 +104,7 @@ uv run python HW1/src/main.py query "information" "retrieval" --show-docs 5
 ## 6. Challenges & Solutions
 
 1. **WARC Header Defects & Deprecating `warcio`**: Inaccurate `Content-Length` values in certain headers caused third-party libraries to desynchronize byte offsets. Replaced with a custom streaming parser that segments records precisely by the boundary marker `b"WARC/0.18"`.
-2. **HTML Encoding Conflicts & Silent Truncations**: Mismatches between HTTP header declarations and internal document encodings caused `lxml` to silently truncate documents. Resolved by decoding into Unicode strings via `UnicodeDammit` before parsing, combined with `ftfy` to repair Mojibake, reducing truncations down to just 1 document.
-3. **Memory Explosion on Massive Corpus**: Native Python object overhead drove peak RSS up to 3.7 GB. Solved by engineering custom columnar contiguous arrays (`array('I')`), dropping peak memory to 1.1 GB (-70%), and employing SPIMI external merge sort to reliably build the full index within a 604 MB memory budget.
+2. **HTML Encoding Conflicts & Silent Truncations**: Mismatches between HTTP header declarations and the actual document encoding caused `lxml` to silently truncate documents. Resolved by decoding into Unicode strings with `UnicodeDammit` before parsing, which reduced empty documents from 163 to 1 (a JavaScript redirect page). `ftfy.fix_encoding` is applied only when mojibake patterns are detected; 2 documents still contain residual mojibake.
+3. **Memory Explosion on Massive Corpus**: Native Python object overhead drove peak RSS up to 3.7 GB. Solved by engineering custom columnar contiguous arrays (`array('I')`), dropping peak memory to 1.1 GB (-70%), and employing SPIMI to build the full index with a peak RSS of 604 MB.
 4. **Fairness in Skip Pointer Benchmarking & Boundary Conditions**: Omitting skip condition evaluations would underestimate comparison overhead, and building skips for short postings adds unnecessary cost. Enforced strict counting of skip comparisons and disabled skip pointers for short lists ($P < 9$) to ensure graceful fallback to linear traversal.
-5. **Year/Numeric Fidelity & URL Truncation Protection**: Numeric years carry critical temporal semantics; stemming is strictly restricted to purely alphabetic tokens to prevent numeric degradation. URLs carry strong topic relevance; enforced `MAX_LEN = 64` to retain core domain structures while discarding unresolved Base64 noise and overly long parameters.
+5. **Year/Numeric Fidelity & Long-Token Filtering**: Numeric years carry critical temporal semantics; stemming is strictly restricted to purely alphabetic tokens to prevent numeric degradation. URLs carry strong topic relevance, so URLs and e-mail addresses up to 64 characters are kept whole; tokens longer than 64 characters (mostly Base64 strings and concatenated URLs) are dropped entirely rather than truncated.
