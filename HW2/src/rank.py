@@ -1,7 +1,17 @@
-"""W：共用權重函式（T6 之後在此加入 rank()）。"""
+"""T6：VSM 排序。權重公式一律 import 自 weighting.py，不在這裡重寫。"""
 from __future__ import annotations
 
+from collections import Counter
+from typing import TYPE_CHECKING
 
-def weight(tf: int, df: int, N: int) -> float:
-    """(1 + log10 tf) * log10(N / df)；tf == 0 或 df == 0 回傳 0.0。"""
+if TYPE_CHECKING:
+    from writer import IndexReader
+
+
+def rank(qtf: Counter[str], candidates: set[int] | None,
+         reader: IndexReader) -> list[tuple[int, float]]:
+    """依 cosine 排序，回傳 [(doc_num, score), ...]。
+
+    依 (-score, doc_num) 排序；candidates 為 None 時不過濾。
+    """
     raise NotImplementedError

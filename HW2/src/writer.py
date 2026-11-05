@@ -457,11 +457,18 @@ class IndexReader:
         """
         raise NotImplementedError
 
-    def get_norms(self) -> array:
+    def get_norms(self, scheme: str = "ltc") -> array:
         """T2：每篇文件的 vector norm |d|。
+
+        第一次呼叫時核對 meta（log_base、formula、scheme、N、來源檔 size 與 sha256）。
+        預設 "ltc" 讀 doc_norms.bin；其他 scheme（加分）讀 doc_norms.<scheme>.bin。
 
         Returns:
             array('d')，下標 = doc_num。
+
+        Raises:
+            FileNotFoundError: norm 檔不存在（請先跑 build_norms.py）。
+            ValueError: meta 與目前的 index 或公式不一致。
         """
         raise NotImplementedError
 
@@ -471,4 +478,44 @@ class IndexReader:
         Returns:
             (doc_nums, tfs)，doc_nums 嚴格遞增；term 不存在時回傳 ([], [])。
         """
+        raise NotImplementedError
+
+    # ------------------------------------------------------------------
+    # HW2 加分接口 stub（T1 / T3）
+    # ------------------------------------------------------------------
+
+    def vocabulary(self) -> list[str]:
+        """T1 加分：排序過的全部 term（與 lexicon.tsv 順序相同）。
+
+        回傳快取的同一個 list，呼叫端不可修改。
+        """
+        raise NotImplementedError
+
+    def prefix_terms(self, prefix: str) -> list[str]:
+        """T1 加分：依字典序回傳以 prefix 開頭的 term（排序 list + bisect）。
+
+        Raises:
+            ValueError: prefix 是空字串。
+        """
+        raise NotImplementedError
+
+    def get_champions(self, term: str, r: int = 50) -> tuple[list[int], list[int]]:
+        """T3 加分：讀取 T2 產出的 champion list（tf 前 r 名）。
+
+        Returns:
+            (doc_nums, tfs)，doc_nums 嚴格遞增；df ≤ r 時等同 get_doc_tf(term)；
+            term 不存在時回傳 ([], [])。
+
+        Raises:
+            FileNotFoundError: champions.r<r>.* 不存在（請先跑 build_champions.py）。
+            ValueError: meta 與目前的 index 不一致。
+        """
+        raise NotImplementedError
+
+    def set_doc_tf_cache(self, maxsize: int) -> None:
+        """T3 加分：設定 get_doc_tf 的 LRU 快取大小；0 = 關閉（預設）。重設時清空快取。"""
+        raise NotImplementedError
+
+    def doc_tf_cache_info(self) -> tuple[int, int]:
+        """T3 加分：回傳 get_doc_tf 快取的 (hits, misses)。"""
         raise NotImplementedError
