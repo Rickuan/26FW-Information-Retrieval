@@ -151,9 +151,9 @@ hits  = rank(qtf, cands, reader)      # T6 → T7 輸出
 - **注意**
   - `main.py query` 預設讀 `HW1/output`（未 stem 版），不要沿用這個預設。
   - 不要在未備份時跑 `main.test.py`，它會把 `HW1/output` 覆蓋成 100 篇的小 index。
-  - `from_config` 採嚴格模式：缺 casefold／stopword／stem 時拋 `ValueError`，只有 `lemma` 可缺（預設 false）。悄悄套用預設值會讓 query 端與 index 不一致，而且不會報錯。
-- **加分**：`vocabulary()`、`prefix_terms()`（排序 list + bisect，已量測優於 RadixTrie），見 `T1.md`。
-- **對應接口**：`IndexReader(dir)`（`writer.py:352`）、`_load_lexicon` 丟棄 df 處（`writer.py:381`）、`get_metadata()`（`writer.py:427`）、`metadata.json["N"]`。HW1 `main.py` 只有 `:214` 是從 metadata 還原設定，HW2 不改它。
+  - `from_config` 採嚴格模式：`cfg` 為 `None` 或 `{}`，或缺 casefold／stopword／stem 時拋 `ValueError`，只有 `lemma` 可缺（預設 false）。悄悄套用預設值會讓 query 端與 index 不一致，而且不會報錯。
+- **加分**：`vocabulary()`、`prefix_terms()`（排序 list + bisect，已量測優於 RadixTrie），見 `done.T1.md`。
+- **對應接口**：`IndexReader(dir)`（`writer.py` `IndexReader.__init__`）、`_load_lexicon` 存 `(df, offset, length)`（`writer.py` `IndexReader._load_lexicon`）、`get_metadata()`（`writer.py` `IndexReader.get_metadata`）、`metadata.json["N"]`。HW1 `main.py` 只有 `run_query()` 是從 metadata 還原設定，HW2 不改它。
 
 ### T2 預算文件向量 norm
 
@@ -169,14 +169,14 @@ hits  = rank(qtf, cands, reader)      # T6 → T7 輸出
   - 不要拿 `doc_len` 當 norm，它只是過濾 stopword 後的 token 數。
   - 那篇空文件 norm 為 0；df = N 的 term 權重為 0。
   - 實測全掃約 16.6 秒、283 MB，跑一次即可，不必優化。
-- **對應接口**：`postings.bin` + `lexicon.tsv` + `metadata.json`；解碼可重用 `get_postings`（`writer.py:402`）或 T3 的 `get_doc_tf`。
+- **對應接口**：`postings.bin` + `lexicon.tsv` + `metadata.json`；解碼可重用 `get_postings`（`writer.py` `IndexReader.get_postings`）或 T3 的 `get_doc_tf`。
 
 ### T3 只取 doc／tf 的快速讀取
 
 - **作業要求**：加分評分看「scoring／ranking 效率」。
 - **做法**：新增 `get_doc_tf(term) -> (doc_nums, tfs)`。讀到 n\_pos 後直接跳過那些 position 的 VByte，不建 `Posting` 物件。`postings.bin` 用 `mmap`（`ACCESS_READ`）開啟一次並快取，每次查詢只做記憶體切片。加分：`get_champions()` 與 LRU 快取，見 `T3.md`。
 - **注意**：position 仍是 VByte，要跳過就必須逐個讀出結束位元，無法直接 seek。既有的 `get_postings` 保持不動，留給 phrase／proximity 使用。
-- **對應接口**：posting 磁碟格式 `[Δdoc][tf][n_pos][Δpos…]`（寫入 `writer.py:156-168`、讀取 `:184-203`）；實測高 df 詞完整解碼可達 128 ms（尚未在 HW2 重測）。
+- **對應接口**：posting 磁碟格式 `[Δdoc][tf][n_pos][Δpos…]`（寫入 `writer.py` `encode_postings_block`、讀取 `writer.py` `decode_postings_block`）；實測高 df 詞完整解碼可達 128 ms（尚未在 HW2 重測）。
 
 ### T4 Query parser
 
@@ -203,7 +203,7 @@ hits  = rank(qtf, cands, reader)      # T6 → T7 輸出
 - **輸出約定**
   - **純 NOT**（例如 `NOT linux`）：`parse` 回傳 `Not(...)`；`evaluate` 回傳 `set(range(N))` 扣掉 X 的結果；`query_terms` 回傳空的 `Counter()`。
   - **引號或括號沒有配對**：`parse` 拋出 `ValueError`，訊息包含字元位置（從 0 起算），例如 `linux)` 的位置是 5。
-- **對應接口**：`Preprocessor.process`（`tokenizer.py:94-106`），回傳 `list[(position, term)]`。position 在過濾 stopword 前編號，空洞會保留。
+- **對應接口**：`Preprocessor.process`（`tokenizer.py` `Preprocessor.process`），回傳 `list[(position, term)]`。position 在過濾 stopword 前編號，空洞會保留。
 
 ### T5 Boolean merge（AND／OR）
 
@@ -219,10 +219,10 @@ hits  = rank(qtf, cands, reader)      # T6 → T7 輸出
   - `Not`：以 `set(range(reader.N))` 為全集，減去 child 的結果。
   - `Phrase`、`Near`：呼叫 `positional.position_match(node, reader)`。T4b 完成前它會拋 `NotImplementedError`，但核心 query 不會走到這裡。
 - **注意**
-  - 既有的多詞 AND（`main.py:248-282`）把中間結果重包成假的 `Posting(d, 1, …)`，tf 已經丟失，不能拿來評分。
-  - `and_query`（`skip_builder.py:233`）只支援兩個詞，而且只能在 memory 模式下用，不要用。
+  - 既有的多詞 AND（`main.py` `run_query`）把中間結果重包成假的 `Posting(d, 1, …)`，tf 已經丟失，不能拿來評分。
+  - `and_query`（`skip_builder.py` `and_query`）只支援兩個詞，而且只能在 memory 模式下用，不要用。
   - 建議評分時使用**整個 query 的所有 term**（例如 `open`、`sourc`、`linux`），只拿 Boolean 結果來過濾。這是常見做法，但規格沒寫，文件中要說明。
-- **對應接口**：`build_skip_list`（`skip_builder.py:51-80`）、`intersect_with_skips(p1, p2) -> (doc_nums, n_comparisons)`（`:174-230`）、`intersect_basic`（`:137-171`）。輸入只需要具備 `.doc_num`／`.skip` 的 list。
+- **對應接口**：`build_skip_list`（`skip_builder.py` `build_skip_list`）、`intersect_with_skips(p1, p2) -> (doc_nums, n_comparisons)`（`skip_builder.py` `intersect_with_skips`）、`intersect_basic`（`skip_builder.py` `intersect_basic`）。輸入只需要具備 `.doc_num`／`.skip` 的 list。
 
 ### T6 VSM 排序
 
@@ -272,7 +272,7 @@ hits  = rank(qtf, cands, reader)      # T6 → T7 輸出
 
     結果是 stem 形式，要在說明中提到。
   - **LRU 快取（T3 加分）**：批次模式（`--queries`）可以呼叫 `reader.set_doc_tf_cache(n)` 開啟，預設不開。
-- **對應接口**：`IndexReader.get_doc(n).trec_id`（`writer.py:418`），只在需要額外顯示 TREC ID 時使用。
+- **對應接口**：`IndexReader.get_doc(n).trec_id`（`writer.py` `IndexReader.get_doc`），只在需要額外顯示 TREC ID 時使用。
 
 ## 加分任務
 
@@ -286,7 +286,7 @@ CP 值最高的是 phrase／proximity 和權重方案變體：前者 HW1 的 pos
 | 2 | Proximity（`linux /5 kernel`） | T4（`Near`、`position_match`）；T5 呼叫 | 複雜查詢，Ch.2 | 兩個 position 列表做雙指標，找距離 ≤ k 的配對 | 同上 | 距離以含 stopword 的 token 位置計算，文件中要說明 |
 | 3 | 權重方案變體（SMART：ltc.ltc、lnc.ltc、bnn 等） | T2（`weight`、`get_norms` 的 scheme）；T6 增加 scheme 參數 | Ch.6 | 把 tf、idf、normalization 三個字母各自實作成函式，以 `--scheme lnc.ltc` 切換 | `weighting.weight()` | doc 端每改一種方案，norm 就要重算一份，檔名帶 scheme（`doc_norms.<scheme>.bin`） |
 | 4 | 多運算子與括號（`(A OR B) AND NOT C`） | T4（T4b）；T5 處理 `Not` | Ch.2–3 | 在同一個遞迴下降 parser 加入 NOT 與括號，優先序 NOT > AND > OR；NOT 以 `set(range(N))` 做集合差 | T4 的 AST、T5 的 merge | 純 `NOT x` 沒有評分 term；純 NOT 的輸出方式由 T6／T7 負責人決定（見「已知限制」） |
-| 5 | Skip pointer 加速 AND | T5 | Ch.2 | T5 直接使用 `intersect_with_skips`，並記錄比較次數對照 `intersect_basic` | `skip_builder.py:51`、`:174` | skip 每次查詢重建，成本 O(df)；要實測確認真的變快才寫進文件 |
+| 5 | Skip pointer 加速 AND | T5 | Ch.2 | T5 直接使用 `intersect_with_skips`，並記錄比較次數對照 `intersect_basic` | `skip_builder.py` `build_skip_list`、`intersect_with_skips` | skip 每次查詢重建，成本 O(df)；要實測確認真的變快才寫進文件 |
 | 6 | Wildcard（`comput*`） | T4（`Wildcard`、`expand`）；T1 提供 `prefix_terms` | Ch.3 | 用排序 list + bisect 做 prefix 展開，依 df 取前 100 個 term（超過時警告），再以 OR 處理 | HW1 的 `RadixTrie` 已量測過，較慢，不採用 | dictionary 已經 stem 過：prefix 要對 stem 後的字串比對，且 prefix 本身不能再 stem |
 | 7 | 拼字更正 | T4（`suggest`）；T1 提供 `vocabulary`；T7 顯示 | Ch.3 | 原詞 df == 0，或最佳建議的 df ≥ 原詞 df × 10 時，用 bigram 篩候選、Damerau 距離排序，df 決定同分時的次序；顯示前 3 個 | dictionary、T1 的 `df()` | dictionary 是 stem 後的形式，只顯示「Did you mean」，不自動替換 |
 | 8a | 不精確 top-k：champion list | T2（建置）、T3（`get_champions`）；T6 使用 | Ch.7 | 每個 df > r 的 term 預存 tf 前 r 名的 doc（預設 r = 50） | T3 | 結果會跟精確 cosine 不同，必須是可關閉的選項，預設關閉 |

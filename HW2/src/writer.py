@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import csv
 import json
+from bisect import bisect_left
 import struct
 from array import array
 from datetime import datetime, timezone
@@ -360,26 +361,27 @@ class IndexReader:
 
     def __init__(self, output_dir: str | Path) -> None:
         self.output_dir = Path(output_dir)
-        self._lexicon: dict[str, tuple[int, int]] | None = None  # term → (offset, length)
+        self._lexicon: dict[str, tuple[int, int, int]] | None = None  # term → (df, offset, length)
         self._postings_path = self.output_dir / "postings.bin"
         self._doc_map: dict[int, DocEntry] | None = None
         self._metadata: dict | None = None
+        self._vocab: list[str] | None = None  # vocabulary() 快取；與 lexicon 共用字串
 
     # ------------------------------------------------------------------
     # Internal helpers
     # ------------------------------------------------------------------
 
-    def _load_lexicon(self) -> dict[str, tuple[int, int]]:
-        """Lazy-load lexicon.tsv 為 dict[term, (offset, length)]。"""
+    def _load_lexicon(self) -> dict[str, tuple[int, int, int]]:
+        """Lazy-load lexicon.tsv 為 dict[term, (df, offset, length)]。"""
         if self._lexicon is not None:
             return self._lexicon
         lex_path = self.output_dir / "lexicon.tsv"
-        lexicon: dict[str, tuple[int, int]] = {}
+        lexicon: dict[str, tuple[int, int, int]] = {}
         with lex_path.open("r", encoding="utf-8", newline="") as f:
             reader = csv.reader(f, delimiter="\t")
             for row in reader:
-                term, _df, offset, length = row[0], int(row[1]), int(row[2]), int(row[3])
-                lexicon[term] = (offset, length)
+                term, df, offset, length = row[0], int(row[1]), int(row[2]), int(row[3])
+                lexicon[term] = (df, offset, length)
         self._lexicon = lexicon
         return lexicon
 
@@ -409,7 +411,7 @@ class IndexReader:
         lexicon = self._load_lexicon()
         if term not in lexicon:
             return []
-        offset, length = lexicon[term]
+        _df, offset, length = lexicon[term]
         with self._postings_path.open("rb") as f:
             f.seek(offset)
             data = f.read(length)
@@ -447,7 +449,7 @@ class IndexReader:
     @property
     def N(self) -> int:
         """T1：文件總數，即 metadata["N"]。"""
-        raise NotImplementedError
+        return int(self.get_metadata()["N"])
 
     def df(self, term: str) -> int:
         """T1：term 的 document frequency。
@@ -455,7 +457,8 @@ class IndexReader:
         Returns:
             lexicon 中記錄的 df；term 不存在時回傳 0。
         """
-        raise NotImplementedError
+        entry = self._load_lexicon().get(term)
+        return entry[0] if entry else 0
 
     def get_norms(self, scheme: str = "ltc") -> array:
         """T2：每篇文件的 vector norm |d|。
@@ -489,7 +492,10 @@ class IndexReader:
 
         回傳快取的同一個 list，呼叫端不可修改。
         """
-        raise NotImplementedError
+        if self._vocab is None:
+            # lexicon.tsv 已依 Python 字串順序排序，dict 保留插入順序，不必再排
+            self._vocab = list(self._load_lexicon())
+        return self._vocab
 
     def prefix_terms(self, prefix: str) -> list[str]:
         """T1 加分：依字典序回傳以 prefix 開頭的 term（排序 list + bisect）。
@@ -497,7 +503,18 @@ class IndexReader:
         Raises:
             ValueError: prefix 是空字串。
         """
-        raise NotImplementedError
+        if not prefix:
+            raise ValueError("prefix must be non-empty")
+        vocab = self.vocabulary()
+        lo = bisect_left(vocab, prefix)
+        if ord(prefix[-1]) == 0x10FFFF:
+            # 最後一個字元已是最大 code point，無法 +1 求上界，改為線性往後掃
+            hi = lo
+            while hi < len(vocab) and vocab[hi].startswith(prefix):
+                hi += 1
+        else:
+            hi = bisect_left(vocab, prefix[:-1] + chr(ord(prefix[-1]) + 1), lo)
+        return vocab[lo:hi]
 
     def get_champions(self, term: str, r: int = 50) -> tuple[list[int], list[int]]:
         """T3 加分：讀取 T2 產出的 champion list（tf 前 r 名）。
