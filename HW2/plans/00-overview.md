@@ -41,9 +41,6 @@ sim(d_j, q) = \frac{\sum_{i} w_{i,j} \, w_{i,q}}{\sqrt{\sum_{i} w_{i,j}^2} \; \s
 | T7 輸出與執行入口 | `<doc#> <score>` 由高到低 | G13 | T6 | `search.py` CLI |
 
 ### 接口定義
-
-以下簽名在 11/06 前以 stub 合進 main。之後各自實作，要改簽名先在群組說明。
-
 ```python
 # W — HW2/src/rank.py
 def weight(tf: int, df: int, N: int) -> float: ...
