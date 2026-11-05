@@ -111,4 +111,29 @@ df 和 offset 放在同一個 tuple，不另開 dict，這樣 57 萬個 term 不
 - **已決定**：`cfg` 是 `{}` 或 `None` 時拋出 `ValueError`，不套用預設值。
 
 ## 9. 實作紀錄
-（待填）
+
+### 9.1 結果
+- 核心 `HW2/tests/t1.test.py`：實作前 0/15，實作後 15/15；加分完成後重跑仍是 15/15。
+- 加分 `HW2/tests/t1_bonus.test.py`：實作前 0/11，實作後 11/11。
+- 第 3 節的接口簽名都沒有改。改到的檔案只有 `HW2/src/writer.py`、`HW2/src/tokenizer.py`，另外新增了兩個測試檔。
+- `HW2/src/` 裡沒有其他模組讀 `_lexicon`／`_load_lexicon`（已 grep 確認），tuple 從 2 欄改成 3 欄只影響 `get_postings`。
+
+### 9.2 與計畫的差異
+- **測試多了一項**：核心測試除了 `from_config({})`，也測 `from_config(None)` 會拋 `ValueError`（第 8 節已決定，但第 5 節的清單沒有列）。所以核心是 15 項，比第 5 節列出的多。
+- **測試寫法**：每項 check 都包在 try/except 裡，stub 拋 `NotImplementedError` 時記為 FAIL，不會中斷整支腳本，這樣「先跑一次確認失敗」能看到全部項目。第一個／最後一個 term 是直接讀 `lexicon.tsv` 取得的，不經過 `IndexReader`（實際是 `,ltd.is`、`𣲛`）。
+- **`from_config` 的錯誤訊息**：`cfg` 為空時是 `preprocessor config is empty: {}`（或 `None`）；缺欄位時是 `preprocessor config missing fields: stopword, stem`。
+- **`IndexReader.__init__` 新增 `self._vocab`**：這是 `vocabulary()` 的快取，第 6.2 節沒有寫明要放在哪裡。
+- **`prefix_terms` 多處理一個邊界情況**：prefix 最後一個字元是 U+10FFFF 時無法 `chr(ord(c) + 1)`，改成從 `lo` 往後線性掃描 `startswith`。其他情況照第 6.1 節的寫法。上界的 `bisect_left` 從 `lo` 開始找。
+- **行號位移**：`writer.py` 第 23 行新增 `from bisect import bisect_left`，之後的行號全部 +1；`__init__` 多了一行，`_load_lexicon` 之後的行號再 +1。新行號：`IndexReader` :353、`_load_lexicon` :374（存 df 在 :384）、`get_postings` :404（解包在 :414）、`get_doc` :420、`get_metadata` :429、`N` :449-452、`df` :454-461、`vocabulary` :490、`prefix_terms` :500。`tokenizer.py` `from_config` 仍在 :107-108 起，`process` 仍在 :94。
+
+### 9.3 量測（本機 WSL2，`perf_counter`）
+| 項目 | 時間 |
+| --- | --- |
+| `_load_lexicon()`（57 萬行，冷啟動） | 約 430–457 ms |
+| `vocabulary()` 第一次（lexicon 已載入） | 7.95 ms |
+| `vocabulary()` 額外記憶體（`tracemalloc`） | 4.59 MB（字串與 lexicon 共用） |
+| `prefix_terms('comput')`（1000 次平均） | 0.001 ms |
+| `prefix_terms('a')`（100 次平均，31,236 筆） | 0.107 ms |
+| RadixTrie 建置（只在對照測試中使用） | 1.31 s |
+
+和第 6.1 節預先量測的數字一致（bisect：`comput` 0.001 ms、`a` 0.087 ms、4 MB）。RadixTrie 這次建置只花 1.31 s，比表中的 3.95 s 快；可能是因為這次只插入 `None` 當值，而且沒有開 `tracemalloc`。這不影響選擇 bisect 的結論。

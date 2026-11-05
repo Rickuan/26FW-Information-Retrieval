@@ -111,4 +111,14 @@ class Preprocessor:
         嚴格模式：cfg 為 None／{}，或缺 casefold、stopword、stem 任一欄位時拋出 ValueError，
         訊息列出缺少的欄位。只有 lemma 可以缺，缺時為 False。未知欄位忽略。
         """
-        raise NotImplementedError
+        if not cfg:
+            raise ValueError(f"preprocessor config is empty: {cfg!r}")
+        missing = [k for k in ("casefold", "stopword", "stem") if k not in cfg]
+        if missing:
+            raise ValueError(f"preprocessor config missing fields: {', '.join(missing)}")
+        return cls(
+            casefold=cfg["casefold"],
+            stopword=cfg["stopword"],
+            stem=cfg["stem"],
+            lemma=cfg.get("lemma", False),
+        )
