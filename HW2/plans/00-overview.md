@@ -55,14 +55,19 @@ T1、T3 改的是 `HW2/src/` 裡從 HW1 複製過來的 `writer.py` 與 `tokeniz
 LOG_BASE = 10; DEFAULT_SCHEME = "ltc"; FORMULA = "(1+log10 tf)*log10(N/df)"
 def weight(tf: int, df: int, N: int, scheme: str = "ltc") -> float: ...
     # (1 + log10 tf) * log10(N / df)；tf == 0 或 df == 0 回傳 0.0；非 ltc 屬於 T2 加分
-def norm_filenames(scheme: str = "ltc") -> tuple[str, str]: ...   # ("doc_norms.bin", "doc_norms.meta.json")
+    # scheme 是單邊三個字母（tf／idf／normalization），只算 tf × idf；不合法（含 "lnc.ltc"）拋 ValueError
+def formula(scheme: str = "ltc") -> str: ...   # T2 加分：tf 片段 + "*" + idf 片段；formula("ltc") == FORMULA
+def norm_filenames(scheme: str = "ltc") -> tuple[str, str]: ...
+    # "ltc" → ("doc_norms.bin", "doc_norms.meta.json")；其他 c 方案 → ("doc_norms.<scheme>.bin", "doc_norms.<scheme>.meta.json")
+    # normalization 為 n 時沒有 norm 檔，拋 ValueError
 
 # T1、T2、T3 — HW2/src/writer.py
 class IndexReader:
     N: int                                    # T1：property，metadata["N"]
     def df(self, term: str) -> int: ...       # T1：term 不存在回傳 0
     def get_norms(self, scheme: str = "ltc") -> array: ...
-        # T2：array('d')，下標 = doc_num；載入時核對 meta，不一致拋 ValueError、檔案不存在拋 FileNotFoundError
+        # T2：array('d')，下標 = doc_num；載入時核對 meta（log_base、formula、scheme、N、count）與來源檔 size／sha256，
+        #     不一致拋 ValueError、檔案不存在拋 FileNotFoundError；normalization 為 n 時直接回傳全 1.0，不讀檔
     def get_doc_tf(self, term: str) -> tuple[list[int], list[int]]: ...
         # T3：(doc_nums, tfs)，doc_nums 嚴格遞增；term 不存在回傳 ([], [])；postings.bin 用 mmap
 
@@ -70,7 +75,7 @@ class IndexReader:
 class Preprocessor:
     @classmethod
     def from_config(cls, cfg: dict) -> "Preprocessor": ...
-        # 嚴格模式：cfg 為空或缺 casefold／stopword／stem 時拋 ValueError；只有 lemma 可缺（預設 False）
+        # 嚴格模式：cfg 為 None、{} 或缺 casefold／stopword／stem 時拋 ValueError；只有 lemma 可缺（預設 False）
 
 # T4 — HW2/src/parser.py（dataclass 是真正的程式碼）
 Term(tokens: list[str])                             # 沒加引號的運算元，隱含 AND
@@ -105,6 +110,7 @@ def evaluate(node: Node, reader: IndexReader) -> set[int] | None: ...
 def rank(qtf: Counter[str], candidates: set[int] | None,
          reader: IndexReader) -> list[tuple[int, float]]: ...
     # 依 (-score, doc) 排序；candidates 為 None 時不過濾；權重只 import weighting.weight
+    # 加分：scheme="ltc.ltc"（"ddd.qqq"，文件端.query 端）、champion_r: int | None = None，見「T6 配合加分項」
 
 # T7 — HW2/src/search.py
 # uv run python HW2/src/search.py --index-dir HW2/index [--top-k K] [--queries FILE] "query"
@@ -115,8 +121,10 @@ def rank(qtf: Counter[str], candidates: set[int] | None,
 # T1 加分 — writer.py
 IndexReader.vocabulary() -> list[str]                    # 排序過的全部 term（快取，不可修改）
 IndexReader.prefix_terms(prefix: str) -> list[str]       # 排序 list + bisect
-# T2 加分 — build_champions.py
-build_champions(index_dir, r: int = 50) -> None          # champions.r<r>.{bin,tsv,meta.json}
+# T2 加分 — weighting.py、build_norms.py、build_champions.py
+formula(scheme: str = "ltc") -> str                       # 寫入／核對 meta 的 formula
+build_norms(index_dir, scheme: str = "ltc") -> None      # CLI --scheme X（單邊）；n 方案拋 ValueError
+build_champions(index_dir, r: int = 50) -> None          # champions.r<r>.{bin,tsv,meta.json}；r < 1 拋 ValueError
 # T3 加分 — writer.py
 IndexReader.get_champions(term: str, r: int = 50) -> tuple[list[int], list[int]]
 IndexReader.set_doc_tf_cache(maxsize: int) -> None       # 0 = 關閉（預設）
@@ -152,24 +160,27 @@ hits  = rank(qtf, cands, reader)      # T6 → T7 輸出
   - `main.py query` 預設讀 `HW1/output`（未 stem 版），不要沿用這個預設。
   - 不要在未備份時跑 `main.test.py`，它會把 `HW1/output` 覆蓋成 100 篇的小 index。
   - `from_config` 採嚴格模式：`cfg` 為 `None` 或 `{}`，或缺 casefold／stopword／stem 時拋 `ValueError`，只有 `lemma` 可缺（預設 false）。悄悄套用預設值會讓 query 端與 index 不一致，而且不會報錯。
-- **加分**：`vocabulary()`、`prefix_terms()`（排序 list + bisect，已量測優於 RadixTrie），見 `done.T1.md`。
+- **加分**：`vocabulary()`、`prefix_terms()`（排序 list + bisect），見 `done.T1.md`。實測 `prefix_terms('a')` 約 0.1 ms、`vocabulary()` 約占 4.6 MB；HW1 的 `RadixTrie` 光建置就約 1.3 s，所以選用 bisect。
 - **對應接口**：`IndexReader(dir)`（`writer.py` `IndexReader.__init__`）、`_load_lexicon` 存 `(df, offset, length)`（`writer.py` `IndexReader._load_lexicon`）、`get_metadata()`（`writer.py` `IndexReader.get_metadata`）、`metadata.json["N"]`。HW1 `main.py` 只有 `run_query()` 是從 metadata 還原設定，HW2 不改它。
 
 ### T2 預算文件向量 norm
 
 - **作業要求**：cosine 分母的 |d\_j| = sqrt(Σ w\_ij²)，對文件內**所有** term 加總。
 - **做法**
-  - 寫一個獨立後處理腳本 `build_norms.py`：依 lexicon 逐一讀取 posting，累加 `norm2[doc] += ((1 + log10 tf) × log10(N / df))²`，最後開根號。
-  - 存成 `HW2/index/doc_norms.bin`（`array('d')`，下標就是 doc\_num，約 278 KB），附一份 `doc_norms.meta.json` 記錄 log 底數、公式版本與來源 index 的 hash。
-  - `IndexReader` 新增 `get_norms()`。第一次載入時核對 meta（log 底數、公式、scheme、N、來源檔 size 與 sha256），不一致就拋 `ValueError`。
-  - 權重公式寫成共用函式 `weight(tf, df, N)`，放在 `weighting.py`，由 T2 實作；T2 和 T6 都呼叫它。
-  - 加分：SMART 方案（`--scheme`，檔名 `doc_norms.<scheme>.bin`）與 champion list，見 `T2.md`。
+  - 寫一個獨立後處理腳本 `build_norms.py`：依 lexicon 逐一讀取 posting，累加 `norm2[doc] += weight(tf, df, N, scheme)²`，最後開根號。scheme 會傳給 `weight`；核心固定是 ltc，即 `((1 + log10 tf) × log10(N / df))²`。
+  - 存成 `HW2/index/doc_norms.bin`（`array('d')`，下標就是 doc\_num，278,288 bytes），附一份 `doc_norms.meta.json`，記錄 `log_base`、`formula`、`scheme`、`N`、`count`，以及 `lexicon.tsv`、`postings.bin`、`metadata.json` 的 size 與 sha256。
+  - `IndexReader` 新增 `get_norms(scheme)`。第一次載入時核對 meta（`log_base`、`formula`、`scheme`、`N`、`count`）、來源檔的 size 與 sha256，以及 norm 檔大小（8 × N），不一致就拋 `ValueError`；結果依 scheme 快取。
+  - 來源檔核對寫成 `writer.py` 的共用 helper `IndexReader._check_sources`，T3 的 `get_champions` 核對 champion meta 時也要共用它。
+  - 權重公式寫成共用函式 `weight(tf, df, N, scheme)`，放在 `weighting.py`，由 T2 實作；T2 和 T6 都呼叫它。
+  - 加分（已完成，見 `T2.md`）：
+    - **SMART**：`weight`、`get_norms`、`build_norms`、`norm_filenames` 的 scheme 都是單邊三個字母；新增 `formula(scheme)`。normalization 為 `n` 時 `get_norms` 回傳全 1.0 的陣列、不讀檔，`build_norms` 與 `norm_filenames` 拋 `ValueError`；非 ltc 的 c 方案檔名帶 scheme（`doc_norms.<scheme>.bin`／`.meta.json`）。lnc 等非預設方案的 norm 檔要先執行 `build_norms.py --scheme X` 才會存在，否則 `get_norms(X)` 拋 `FileNotFoundError`。
+    - **Champion list**：`build_champions.py` 產生 `champions.r50.{bin,tsv,meta.json}`。只收 df > r 的 term，依 `(-tf, doc)` 取前 r 筆再依 doc 遞增寫出；r = 50 時共 15,755 個 term。block 格式是 `u32be n` + n × `[VByte Δdoc][VByte tf]`，沒有 positions。
 - **注意**
   - Python 要用 `math.log10`。`math.log` 是自然對數，用錯不會報錯，只會讓分數悄悄偏掉。
   - 不要拿 `doc_len` 當 norm，它只是過濾 stopword 後的 token 數。
-  - 那篇空文件 norm 為 0；df = N 的 term 權重為 0。
-  - 實測全掃約 16.6 秒、283 MB，跑一次即可，不必優化。
-- **對應接口**：`postings.bin` + `lexicon.tsv` + `metadata.json`；解碼可重用 `get_postings`（`writer.py` `IndexReader.get_postings`）或 T3 的 `get_doc_tf`。
+  - 唯一的空文件是 doc 24621（`doc_len = 0`），c 方案下 norm 為 0；df = N 的 term 權重為 0。
+  - 實測 `build_norms`（ltc）約 15–16 秒、峰值 221 MB；`build_champions`（r = 50）約 15 秒。跑一次即可，不必優化。
+- **對應接口**：`postings.bin` + `lexicon.tsv` + `metadata.json`；`postings.bin` 只開一次，依 `IndexReader._load_lexicon` 的 offset／length 讀 block，用 `writer.py` 的 `decode_postings_block` 解碼（不用 `IndexReader.get_postings`，它每次呼叫都重新開檔）。T3 完成後可改用 `get_doc_tf`，輸出必須逐 byte 不變。
 
 ### T3 只取 doc／tf 的快速讀取
 
@@ -240,11 +251,12 @@ hits  = rank(qtf, cands, reader)      # T6 → T7 輸出
   - |q| 不影響排序，但會影響輸出分數，必須照公式除上。
   - Python 累加器用 `dict` 即可。高 df 詞若太慢，可改用長度 N 的 `array('d')`。
 - **配合加分項**（都排在 T6 核心之後；新參數的預設值要讓核心結果完全不變）：
-  - **SMART（T2 加分）**：`rank(qtf, candidates, reader, scheme="ltc.ltc")` 要增加 scheme 參數，並依 `.` 拆成文件端與 query 端。
-    - 文件端：權重用 `weight(tf, df, N, doc_scheme)`，分母用 `reader.get_norms(doc_scheme)`。
-    - query 端：權重用 `weight(qtf, df, N, query_scheme)`。第三個字母是 `c` 時除以 |q|，是 `n` 時不除。
+  - **SMART（T2 加分）**：`rank(qtf, candidates, reader, scheme="ltc.ltc")` 要增加 scheme 參數。scheme 寫成 `"ddd.qqq"`（例如 `lnc.ltc`：文件端 lnc、query 端 ltc），由 `rank` 用 `doc_s, q_s = scheme.split(".")` 拆開，格式錯誤拋 `ValueError`；`weighting` 的函式只接受單邊的三個字母。
+    - 文件端：權重用 `weight(tf, df, N, doc_s)`，分母用 `reader.get_norms(doc_s)[doc]`；norm 為 0 的文件（只有 c 方案下的 doc 24621）跳過。`n` 方案的 `get_norms` 回傳全 1.0，不必寫特例。
+    - query 端：權重用 `weight(qtf, df, N, q_s)`。第三個字母是 `c` 時除以 |q|，是 `n` 時不除；|q| 由 T6 自己算。
+    - 非預設的 c 方案要先執行 `build_norms.py --scheme X` 建好 norm 檔，否則 `get_norms` 拋 `FileNotFoundError`。
     - 預設 `ltc.ltc` 必須與核心結果完全相同（見 `T2.md` 6.1）。
-  - **不精確 top-k（T2／T3 加分）**：champion list 用 `reader.get_champions(term, r)` 取代 `get_doc_tf`；index elimination 只用 idf 高於門檻的 term，由 T6 自己做。兩者都必須是可關閉的選項，而且預設關閉。
+  - **不精確 top-k（T2／T3 加分）**：champion list 加一個參數 `champion_r: int | None = None`，不是 `None` 時用 `reader.get_champions(term, champion_r)` 取代 `get_doc_tf`，分母仍用完整的 `get_norms(doc_s)`；index elimination 只用 idf 高於門檻的 term，由 T6 自己做。兩者都必須是可關閉的選項，而且預設關閉。
   - **Wildcard（T4b）**：沒有接口變動。展開後的每個 term 都會進入 `query_terms`，各計 1 次，照常評分。
   - **NOT（T4b）**：純 `NOT x` 的 query 沒有評分 term。純 NOT 的輸出方式由 T6／T7 負責人決定（見「已知限制」）。
 - **對應接口**：T1 的 `df()`、T2 的 `get_norms()`、T3 的 `get_doc_tf()`、T5 的候選集合。
@@ -287,9 +299,9 @@ CP 值最高的是 phrase／proximity 和權重方案變體：前者 HW1 的 pos
 | 3 | 權重方案變體（SMART：ltc.ltc、lnc.ltc、bnn 等） | T2（`weight`、`get_norms` 的 scheme）；T6 增加 scheme 參數 | Ch.6 | 把 tf、idf、normalization 三個字母各自實作成函式，以 `--scheme lnc.ltc` 切換 | `weighting.weight()` | doc 端每改一種方案，norm 就要重算一份，檔名帶 scheme（`doc_norms.<scheme>.bin`） |
 | 4 | 多運算子與括號（`(A OR B) AND NOT C`） | T4（T4b）；T5 處理 `Not` | Ch.2–3 | 在同一個遞迴下降 parser 加入 NOT 與括號，優先序 NOT > AND > OR；NOT 以 `set(range(N))` 做集合差 | T4 的 AST、T5 的 merge | 純 `NOT x` 沒有評分 term；純 NOT 的輸出方式由 T6／T7 負責人決定（見「已知限制」） |
 | 5 | Skip pointer 加速 AND | T5 | Ch.2 | T5 直接使用 `intersect_with_skips`，並記錄比較次數對照 `intersect_basic` | `skip_builder.py` `build_skip_list`、`intersect_with_skips` | skip 每次查詢重建，成本 O(df)；要實測確認真的變快才寫進文件 |
-| 6 | Wildcard（`comput*`） | T4（`Wildcard`、`expand`）；T1 提供 `prefix_terms` | Ch.3 | 用排序 list + bisect 做 prefix 展開，依 df 取前 100 個 term（超過時警告），再以 OR 處理 | HW1 的 `RadixTrie` 已量測過，較慢，不採用 | dictionary 已經 stem 過：prefix 要對 stem 後的字串比對，且 prefix 本身不能再 stem |
+| 6 | Wildcard（`comput*`） | T4（`Wildcard`、`expand`）；T1 提供 `prefix_terms` | Ch.3 | 用排序 list + bisect 做 prefix 展開，依 df 取前 100 個 term（超過時警告），再以 OR 處理 | 實測 `prefix_terms('a')` 約 0.1 ms、`vocabulary()` 約占 4.6 MB；HW1 的 `RadixTrie` 建置約 1.3 s，所以選用 bisect | dictionary 已經 stem 過：prefix 要對 stem 後的字串比對，且 prefix 本身不能再 stem |
 | 7 | 拼字更正 | T4（`suggest`）；T1 提供 `vocabulary`；T7 顯示 | Ch.3 | 原詞 df == 0，或最佳建議的 df ≥ 原詞 df × 10 時，用 bigram 篩候選、Damerau 距離排序，df 決定同分時的次序；顯示前 3 個 | dictionary、T1 的 `df()` | dictionary 是 stem 後的形式，只顯示「Did you mean」，不自動替換 |
-| 8a | 不精確 top-k：champion list | T2（建置）、T3（`get_champions`）；T6 使用 | Ch.7 | 每個 df > r 的 term 預存 tf 前 r 名的 doc（預設 r = 50） | T3 | 結果會跟精確 cosine 不同，必須是可關閉的選項，預設關閉 |
+| 8a | 不精確 top-k：champion list | T2（建置，已完成）、T3（`get_champions`）；T6 使用（`champion_r`） | Ch.7 | 每個 df > r 的 term 依 `(-tf, doc)` 預存前 r 名的 doc（預設 r = 50，共 15,755 個 term，建置約 15 s），存成 `champions.r50.{bin,tsv,meta.json}` | T3；meta 核對共用 `IndexReader._check_sources` | 結果會跟精確 cosine 不同，必須是可關閉的選項，預設關閉 |
 | 8b | 不精確 top-k：index elimination | T6 | Ch.7 | 只用 idf 高於門檻的 term | T1 的 `df()` | 同上 |
 | 9 | Web UI 與 term highlighting | T7 | 介面 | Flask／FastAPI 單頁；快速版可用 Streamlit | `doc_map`（URL、TREC ID） | index 沒有存原文與字元 offset，highlight 要回 WARC 重讀文件，成本最高 |
 | 10 | `get_doc_tf` 的 LRU 快取 | T3 | 效率 | `set_doc_tf_cache(maxsize)`，預設關閉 | — | 要量測同一個 query 重跑的加速，回傳複本避免被修改 |
@@ -321,7 +333,7 @@ CP 值最高的是 phrase／proximity 和權重方案變體：前者 HW1 的 pos
 - [ ] 管理設定：`pyproject.toml`、`uv.lock`（順便補宣告 `tqdm`）
 - [ ] 輸出結果：範例 query 的 ranked list（`outputs/*.txt`）
 - [ ] 一頁文件：主要特色、遇到的困難、執行環境需求、成員與分工
-- [ ] 決定是否附上 index 與 `doc_norms.bin`：附上則 TA 不必重建，但檔案會很大；不附則 README 要寫清楚重建步驟
+- [ ] 決定是否附上 index 與 `doc_norms*.bin`、`champions.*`（見「待確認」）：附上則 TA 不必重建，但檔案會很大；不附則 README 要寫清楚重建步驟與所需時間
 
 
 
@@ -350,4 +362,4 @@ CP 值最高的是 phrase／proximity 和權重方案變體：前者 HW1 的 pos
 - [ ] 純 `NOT x` 的 query（沒有評分 term）：純 NOT 的輸出方式由 T6／T7 負責人決定（見「已知限制」）
 - [x] 拼字建議的觸發條件：已決定在「原詞的 df == 0，或最佳建議的 df ≥ 原詞 df × 10」時觸發，T7 顯示前 3 個建議
 - [ ] 輸出是否要截 top-k？
-- [ ] zip 是否附 index？
+- [ ] zip 是否附 index，以及 `doc_norms*.bin`、`champions.*` 與其 meta？（不附時 README 要寫重建指令：`build_norms.py` 約 15–16 s、`build_champions.py` 約 15 s）

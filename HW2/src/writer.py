@@ -19,6 +19,7 @@ lexicon.tsv（字典序，TAB 分隔）：
 from __future__ import annotations
 
 import csv
+import hashlib
 import json
 from bisect import bisect_left
 import struct
@@ -27,6 +28,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from indexer import DocEntry, Indexer, Posting
+from weighting import LOG_BASE, formula, norm_filenames
 
 
 # ---------------------------------------------------------------------------
@@ -350,6 +352,18 @@ class IndexWriter:
 # Step 4-E：IndexReader — lazy-load lexicon，seek + decode
 # ---------------------------------------------------------------------------
 
+_NORM_SOURCES = ("lexicon.tsv", "postings.bin", "metadata.json")
+
+
+def _fingerprint(path: Path) -> dict:
+    """回傳檔案的 {"size", "sha256"}，供 meta 的 sources 記錄與核對。"""
+    h = hashlib.sha256()
+    with path.open("rb") as f:
+        for chunk in iter(lambda: f.read(1 << 20), b""):
+            h.update(chunk)
+    return {"size": path.stat().st_size, "sha256": h.hexdigest()}
+
+
 class IndexReader:
     """從磁碟讀取由 IndexWriter 產生的索引。
 
@@ -366,6 +380,7 @@ class IndexReader:
         self._doc_map: dict[int, DocEntry] | None = None
         self._metadata: dict | None = None
         self._vocab: list[str] | None = None  # vocabulary() 快取；與 lexicon 共用字串
+        self._norms: dict[str, array] = {}  # get_norms() 快取：scheme → array('d')
 
     # ------------------------------------------------------------------
     # Internal helpers
@@ -465,6 +480,7 @@ class IndexReader:
 
         第一次呼叫時核對 meta（log_base、formula、scheme、N、來源檔 size 與 sha256）。
         預設 "ltc" 讀 doc_norms.bin；其他 scheme（加分）讀 doc_norms.<scheme>.bin。
+        normalization 為 n 的 scheme 直接回傳全 1.0 的陣列，不讀檔。
 
         Returns:
             array('d')，下標 = doc_num。
@@ -473,7 +489,50 @@ class IndexReader:
             FileNotFoundError: norm 檔不存在（請先跑 build_norms.py）。
             ValueError: meta 與目前的 index 或公式不一致。
         """
-        raise NotImplementedError
+        cached = self._norms.get(scheme)
+        if cached is not None:
+            return cached
+        formula(scheme)  # 先驗證 scheme（不合法時拋出 ValueError）
+        if scheme[2] == "n":  # |d| 依定義是 1，不讀檔
+            self._norms[scheme] = array("d", [1.0]) * self.N
+            return self._norms[scheme]
+        bin_name, meta_name = norm_filenames(scheme)
+        bin_path = self.output_dir / bin_name
+        meta_path = self.output_dir / meta_name
+        if not bin_path.exists() or not meta_path.exists():
+            raise FileNotFoundError(
+                f"{bin_path if not bin_path.exists() else meta_path} not found; "
+                "run build_norms.py first"
+            )
+        with meta_path.open("r", encoding="utf-8") as f:
+            meta = json.load(f)
+        expected = {"log_base": LOG_BASE, "formula": formula(scheme), "scheme": scheme,
+                    "N": self.N, "count": self.N}
+        for key, want in expected.items():
+            if meta.get(key) != want:
+                raise ValueError(f"{meta_name}: {key} is {meta.get(key)!r}, expected {want!r}")
+        self._check_sources(meta, meta_name, _NORM_SOURCES)
+        if bin_path.stat().st_size != 8 * self.N:
+            raise ValueError(
+                f"{bin_name}: size is {bin_path.stat().st_size}, expected {8 * self.N}"
+            )
+        norms = array("d")
+        with bin_path.open("rb") as f:
+            norms.fromfile(f, self.N)
+        self._norms[scheme] = norms
+        return norms
+
+    def _check_sources(self, meta: dict, meta_name: str, names: tuple[str, ...]) -> None:
+        """核對 meta["sources"] 中每個來源檔的 size 與 sha256 是否與目前的 index 相符。"""
+        sources = meta.get("sources", {})
+        for name in names:
+            rec = sources.get(name)
+            if rec is None:
+                raise ValueError(f"{meta_name}: sources missing {name}")
+            actual = _fingerprint(self.output_dir / name)
+            for key in ("size", "sha256"):
+                if rec.get(key) != actual[key]:
+                    raise ValueError(f"{meta_name}: sources[{name}].{key} does not match index")
 
     def get_doc_tf(self, term: str) -> tuple[list[int], list[int]]:
         """T3：只取 doc_num 與 tf（略過 positions，不建 Posting 物件）。
