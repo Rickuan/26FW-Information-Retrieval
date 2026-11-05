@@ -108,6 +108,7 @@ class Preprocessor:
     def from_config(cls, cfg: dict) -> "Preprocessor":
         """T1：由 metadata["preprocessor"] 還原 Preprocessor。
 
-        缺少的欄位（例如舊 index 沒有 lemma）使用預設值；lemma 缺省為 False。
+        嚴格模式：cfg 為 None／{}，或缺 casefold、stopword、stem 任一欄位時拋出 ValueError，
+        訊息列出缺少的欄位。只有 lemma 可以缺，缺時為 False。未知欄位忽略。
         """
         raise NotImplementedError
