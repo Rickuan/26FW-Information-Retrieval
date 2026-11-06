@@ -137,3 +137,34 @@ df 和 offset 放在同一個 tuple，不另開 dict，這樣 57 萬個 term 不
 | RadixTrie 建置（只在對照測試中使用） | 1.31 s |
 
 和第 6.1 節預先量測的數字一致（bisect：`comput` 0.001 ms、`a` 0.087 ms、4 MB）。RadixTrie 這次建置只花 1.31 s，比表中的 3.95 s 快；可能是因為這次只插入 `None` 當值，而且沒有開 `tracemalloc`。這不影響選擇 bisect 的結論。
+
+## 10. 一頁文件素材
+只根據第 9 節實作紀錄與第 4、8 節的已決定事項整理，沒有新增未量測的數字。
+
+### 10.1 主要特色
+1. **query 端的前處理一定和 index 一致**：`Preprocessor.from_config` 只從 `metadata.json` 還原設定，而且採嚴格模式，缺欄位就拋 `ValueError`。前處理不一致不會報錯，只會讓分數全錯，所以值得用嚴格模式擋住。
+2. **df 不另開 dict**：lexicon 的 tuple 從 `(offset, length)` 擴成 `(df, offset, length)`，57 萬個 term 不會多一份 key 的記憶體，T3 也直接沿用同一個 lexicon。
+3. **prefix 查詢用排序 list + bisect，不用 HW1 的 RadixTrie**：`lexicon.tsv` 本身已排序，不必另外建結構，就能當作 wildcard（T4b）的基礎。
+
+### 10.2 量測數據
+皆在本機 WSL2 上用 `perf_counter` 量測（記憶體用 `tracemalloc`），只量一台機器。
+
+| 數據 | 前提條件 | 比較對象 |
+| --- | --- | --- |
+| `_load_lexicon()` 約 430–457 ms | 冷啟動、讀 573,233 行；每個 process 第一次用 reader 時都要付這筆成本 | 無（這是所有查詢的啟動成本） |
+| `vocabulary()` 第一次 7.95 ms、額外 4.59 MB | lexicon 已載入；字串與 lexicon 共用，所以記憶體只有 list 本身 | HW1 `RadixTrie` 建置 1.31 s（只插入 `None` 當值、沒開 `tracemalloc`，只在對照測試中使用） |
+| `prefix_terms('comput')` 0.001 ms（64 筆） | 1000 次平均，`vocabulary()` 已快取 | 實作紀錄沒有重測 RadixTrie 的查詢時間 |
+| `prefix_terms('a')` 0.107 ms（31,236 筆） | 100 次平均，`vocabulary()` 已快取 | 同上 |
+| 測試 15/15（核心）、11/11（加分） | 先在 stub 狀態確認 0/15、0/11 再實作 | 加分 `prefix_terms` 與暴力掃描、`RadixTrie.prefix_search` 對 20 個隨機 prefix 結果相同 |
+
+### 10.3 遇到的困難與解法
+- **Index 版本容易拿錯**：總規劃原本寫從 `HW1/output` 複製，但那是未 stem 的版本，交出去的是 `HW1/output_main`（stop+stem）。用錯版本程式照樣能跑，只是結果不同。解法：確認 `HW2/index/` 與繳交的 `dictionary.txt`／`postings.txt` 逐 byte 相同，HW2 程式一律明確指定這個路徑。
+- **前處理設定可能悄悄套用預設值**：`Preprocessor.__init__` 和 HW1 `main.py:214` 都有預設值，缺欄位也不會報錯。解法：`from_config` 改成嚴格模式，`None`、`{}` 或缺 casefold／stopword／stem 都拋 `ValueError`，只有 `lemma` 可以缺（預設 False）；測試也涵蓋 `from_config(None)`。
+- **`prefix_terms` 的上界在 U+10FFFF 時算不出來**：最後一個字元已是最大 code point，無法 `chr(ord(c) + 1)`。解法：這個情況改成從下界往後線性掃描 `startswith`。
+
+### 10.4 限制
+- **每次 CLI 查詢都要付約 0.4 s 的 lexicon 載入**，這是啟動成本，與單次 `df()` 或 prefix 查詢的時間要分開看。
+- **`vocabulary()` 回傳的是共用的快取 list**，呼叫端修改它會影響之後所有呼叫；程式沒有保護，只靠約定。
+- **與 RadixTrie 的比較只能說「建置快很多」**：實作紀錄只有 RadixTrie 建置時間（1.31 s；計畫階段另量到 3.95 s，兩次差很多），沒有重測它的查詢時間，不能寫出精確的查詢加速倍數。
+- **prefix 是對 stem 後的 dictionary 比對**，prefix 本身不做 stem，所以 `computing*` 對不到 `comput`（T4b 的已知限制，原因在 T1 的資料形式）。
+- **HW1 裡的設定還原沒有修**：`main.py query` 預設仍讀未 stem 的 `HW1/output`，`verify_output.py` 也沒有讀 lemma；T1 依範圍不動 `HW1/`。

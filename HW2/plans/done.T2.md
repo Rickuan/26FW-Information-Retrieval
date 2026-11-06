@@ -237,3 +237,39 @@ meta 格式（`sources` 的結構與 champion 的 meta 相同，T3 的 `get_cham
 - 加分測試是先寫測試、再實作；沒有另外跑一次「stub 狀態全部失敗」。
 - `build_champions` 的「T3 完成後改用 `get_doc_tf`」尚未做（T3 不在範圍）。
 - 沒有執行任何 git 指令。
+
+## 10. 一頁文件素材
+只根據第 9 節實作紀錄與本文件已決定的事項整理，沒有新增未量測的數字。
+
+### 10.1 主要特色
+1. **公式只寫一次，norm 檔載入時會核對**：建 norm 和評分都只呼叫 `weighting.weight()`；norm 檔附 meta，記錄公式、log 底數與來源檔的 sha256，載入時不一致就拋 `ValueError`。這能擋住「log 底數或 index 換了，分數悄悄偏掉」這種不會報錯的錯誤。
+2. **SMART 權重方案支援 12 種組合（tf、idf、normalization 三個字母各自獨立），測試涵蓋 ltc、lnc、ntc、bnn**：三個字母各自是小函式；normalization 為 `n` 時 `get_norms` 直接回傳全 1.0，T6 不必寫特例。
+3. **Champion list 只需存 2.7% 的 term**：r = 50 時只收 df > 50 的 15,755 個 term，其餘 557,478 個 term 的 champion list 就是完整的 postings，不必寫檔。
+
+### 10.2 量測數據
+皆在本機 WSL2 上量測，時間用 `perf_counter`，峰值記憶體用 `ru_maxrss`（整個 process 的 RSS）。
+
+| 數據 | 前提條件 | 比較對象 |
+| --- | --- | --- |
+| `build_norms`（ltc）15.27 s、峰值 RSS 221.0 MB | 離線跑一次，掃過全部 573,233 個 term；查詢時直接載入結果 | 同機重建 ltc 一次為 17.07 s／222.0 MB，可見時間有約 2 s 的波動 |
+| `doc_norms.bin` 278,288 bytes | 8 bytes × N（34,786） | — |
+| 20 篇文件 norm 誤差 0.0 | `random.Random(42)` 抽 20 篇，只驗這 20 篇，不是全部文件 | 測試內獨立解析 `postings.txt` 並自己寫 `log10` 公式，不經過 `IndexReader` |
+| lnc 建置 16.56 s／235.1 MB，20 篇誤差 0.0 | 在暫存目錄建置（symlink 來源檔），`HW2/index/` 裡沒有 lnc 檔 | 同上的獨立解析器 |
+| `build_champions`（r = 50）15.17 s、峰值 RSS 222.2 MB | 離線跑一次；輸出 `.bin` 1,943,640 bytes、`.tsv` 333,990 bytes、meta 410 bytes | term 數 15,755，與 `awk '$2>50'` 的結果一致 |
+| 測試 19/19（核心）、37/37（加分） | 核心先在 stub 狀態確認 0/19；加分沒有另外跑「stub 狀態全部失敗」 | — |
+
+### 10.3 遇到的困難與解法
+- **有一篇空文件**：doc 24621 的 `doc_len = 0`，在 c 方案下 norm 是 0.0，cosine 會除以 0。解法：norm 照實存 0.0，並在 T6 的接口說明中規定 norm 為 0 的文件要跳過；n 方案下它是 1.0，但沒有任何 term，不會進累加器。
+- **norm 檔可能和 index 對不上**：index 重建或公式改了，舊的 norm 檔仍能載入，分數就悄悄錯掉。解法：meta 記錄 `log_base`、`formula`、`scheme`、`N`、`count` 與三個來源檔的 size／sha256；建置和核對共用 `_fingerprint`，核對寫成 `_check_sources`，T3 的 `get_champions` 也共用它。
+- **權重函式原本規劃放在 T6 的 `rank.py`**：這樣 T2 和 T6 會同時改同一個檔案。解法：獨立成 `weighting.py`，由 T2 負責，T2 和 T6 都只 import 它。
+- **normalization 為 `n` 時該怎麼處理**：若讓 `get_norms` 拋錯，T6 就要自己判斷第三個字母，normalization 的邏輯會分散兩處。解法：`get_norms` 回傳全 1.0、不讀檔；`build_norms` 和 `norm_filenames` 遇到 `n` 才拋 `ValueError`。
+- **champion 的 tsv 不能用 `split("\t")` 讀**：lexicon 中有 634 個含 `"` 的 term，會被 csv 加上引號。解法：寫檔用與 `lexicon.tsv` 相同的 `csv.writer`，讀檔規定用 `csv.reader`。
+
+### 10.4 限制
+- **建置時間沒有優化**：約 15–17 s，只需離線跑一次，所以沒有處理。
+- **正確性是抽樣驗證**：獨立路徑只對照 20 篇文件，不是全部 34,786 篇。
+- **meta 只核對來源檔，不核對 norm 檔本身的內容**：`doc_norms.bin` 只檢查大小是否為 8 × N，內容若被改壞但大小不變，不會被發現。
+- **SMART 其他 8 種組合沒有測試**：手算值只驗了 ltc、lnc、ntc、bnn 四種，其餘 8 種只是由同一張字母表組合出來，沒有對應的測試。唯一例外是 `get_norms("ltn")` 有測「回傳全 1.0」，但 ltn 的權重值沒有測。
+- **非預設方案要先建檔**：`HW2/index/` 只有 ltc 的 norm 檔；用 lnc 等方案前要先跑 `build_norms.py --scheme X`，否則 `get_norms` 拋 `FileNotFoundError`。
+- **sha256 核對有啟動成本**：每個 process 第一次呼叫 `get_norms` 都要算三個來源檔的 sha256，實作紀錄沒有單獨量測這筆時間。
+- **champion list 只是建好了檔案**：它是不精確的 top-k，結果會和精確 cosine 不同；目前還沒接進 T6，也沒有量測排序品質，不能宣稱有加速效果。

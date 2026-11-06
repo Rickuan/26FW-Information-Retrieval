@@ -126,7 +126,7 @@ formula(scheme: str = "ltc") -> str                       # 寫入／核對 meta
 build_norms(index_dir, scheme: str = "ltc") -> None      # CLI --scheme X（單邊）；n 方案拋 ValueError
 build_champions(index_dir, r: int = 50) -> None          # champions.r<r>.{bin,tsv,meta.json}；r < 1 拋 ValueError
 # T3 加分 — writer.py
-IndexReader.get_champions(term: str, r: int = 50) -> tuple[list[int], list[int]]
+IndexReader.get_champions(term: str, r: int = 50) -> tuple[list[int], list[int]]  # doc 遞增；r < 1、meta／tsv 不符拋 ValueError；檔案不存在拋 FileNotFoundError
 IndexReader.set_doc_tf_cache(maxsize: int) -> None       # 0 = 關閉（預設）
 IndexReader.doc_tf_cache_info() -> tuple[int, int]       # (hits, misses)
 # T4b — spelling.py
@@ -180,14 +180,14 @@ hits  = rank(qtf, cands, reader)      # T6 → T7 輸出
   - 不要拿 `doc_len` 當 norm，它只是過濾 stopword 後的 token 數。
   - 唯一的空文件是 doc 24621（`doc_len = 0`），c 方案下 norm 為 0；df = N 的 term 權重為 0。
   - 實測 `build_norms`（ltc）約 15–16 秒、峰值 221 MB；`build_champions`（r = 50）約 15 秒。跑一次即可，不必優化。
-- **對應接口**：`postings.bin` + `lexicon.tsv` + `metadata.json`；`postings.bin` 只開一次，依 `IndexReader._load_lexicon` 的 offset／length 讀 block，用 `writer.py` 的 `decode_postings_block` 解碼（不用 `IndexReader.get_postings`，它每次呼叫都重新開檔）。T3 完成後可改用 `get_doc_tf`，輸出必須逐 byte 不變。
+- **對應接口**：`postings.bin` + `lexicon.tsv` + `metadata.json`；`postings.bin` 只開一次，依 `IndexReader._load_lexicon` 的 offset／length 讀 block，用 `writer.py` 的 `decode_postings_block` 解碼（不用 `IndexReader.get_postings`，它每次呼叫都重新開檔）。已決定 `build_norms`、`build_champions` 都不改用 `get_doc_tf`（見 `T3.md` §9.2）。
 
 ### T3 只取 doc／tf 的快速讀取
 
 - **作業要求**：加分評分看「scoring／ranking 效率」。
-- **做法**：新增 `get_doc_tf(term) -> (doc_nums, tfs)`。讀到 n\_pos 後直接跳過那些 position 的 VByte，不建 `Posting` 物件。`postings.bin` 用 `mmap`（`ACCESS_READ`）開啟一次並快取，每次查詢只做記憶體切片。加分：`get_champions()` 與 LRU 快取，見 `T3.md`。
+- **做法**：新增 `get_doc_tf(term) -> (doc_nums, tfs)`。讀到 n\_pos 後直接跳過那些 position 的 VByte，不建 `Posting` 物件。`postings.bin` 用 `mmap`（`ACCESS_READ`）開啟一次並快取，每次查詢只做記憶體切片。解完會核對 block 的結束位置等於 `offset + length`、df 標頭等於 lexicon 的 df，不符拋 `ValueError`。全 index 掃描會碰到 `postings.bin` 的全部 63 MB，這些 mmap 的 file-backed 分頁會算進 RSS。加分：`get_champions()` 與 LRU 快取，見 `T3.md`。
 - **注意**：position 仍是 VByte，要跳過就必須逐個讀出結束位元，無法直接 seek。既有的 `get_postings` 保持不動，留給 phrase／proximity 使用。
-- **對應接口**：posting 磁碟格式 `[Δdoc][tf][n_pos][Δpos…]`（寫入 `writer.py` `encode_postings_block`、讀取 `writer.py` `decode_postings_block`）；實測高 df 詞完整解碼可達 128 ms（尚未在 HW2 重測）。
+- **對應接口**：posting 磁碟格式 `[Δdoc][tf][n_pos][Δpos…]`（寫入 `writer.py` `encode_postings_block`、讀取 `writer.py` `decode_postings_block`）；HW2 實測（暖身後 5 次中位數，見 `T3.md` §9.1）：`home` 由 `get_postings` 23.779 ms 降到 `get_doc_tf` 6.549 ms（3.63x），`new` 由 21.987 ms 降到 6.326 ms（3.48x）；加速主要來自跳過 positions，mmap 的貢獻可忽略。
 
 ### T4 Query parser
 

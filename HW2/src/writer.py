@@ -21,9 +21,11 @@ from __future__ import annotations
 import csv
 import hashlib
 import json
+import mmap
 from bisect import bisect_left
 import struct
 from array import array
+from collections import OrderedDict
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -381,6 +383,14 @@ class IndexReader:
         self._metadata: dict | None = None
         self._vocab: list[str] | None = None  # vocabulary() 快取；與 lexicon 共用字串
         self._norms: dict[str, array] = {}  # get_norms() 快取：scheme → array('d')
+        self._mm: mmap.mmap | None = None  # postings.bin 的唯讀 mmap（get_doc_tf 共用）
+        # get_champions() 快取：r → (term → (offset, length), champions.r<r>.bin 的內容)
+        self._champions: dict[int, tuple[dict[str, tuple[int, int]], bytes]] = {}
+        # get_doc_tf 的 LRU 快取（0 = 關閉）：term → (array('I'), array('I'))
+        self._tf_cache: OrderedDict[str, tuple[array, array]] = OrderedDict()
+        self._tf_cache_size = 0
+        self._tf_hits = 0
+        self._tf_misses = 0
 
     # ------------------------------------------------------------------
     # Internal helpers
@@ -411,6 +421,13 @@ class IndexReader:
             for k, v in raw.items()
         }
         return self._doc_map
+
+    def _postings_mm(self) -> mmap.mmap:
+        """第一次呼叫時以唯讀 mmap 開啟 postings.bin 並快取，之後共用同一個物件。"""
+        if self._mm is None:
+            with self._postings_path.open("rb") as f:
+                self._mm = mmap.mmap(f.fileno(), 0, access=mmap.ACCESS_READ)
+        return self._mm
 
     # ------------------------------------------------------------------
     # Public API
@@ -539,8 +556,81 @@ class IndexReader:
 
         Returns:
             (doc_nums, tfs)，doc_nums 嚴格遞增；term 不存在時回傳 ([], [])。
+
+        Raises:
+            ValueError: block 的 df 標頭或長度與 lexicon 不一致。
         """
-        raise NotImplementedError
+        if self._tf_cache_size == 0 or term not in self._load_lexicon():
+            return self._decode_doc_tf(term)
+        cached = self._tf_cache.get(term)
+        if cached is not None:
+            self._tf_cache.move_to_end(term)
+            self._tf_hits += 1
+            return list(cached[0]), list(cached[1])
+        self._tf_misses += 1
+        docs, tfs = self._decode_doc_tf(term)
+        self._tf_cache[term] = (array("I", docs), array("I", tfs))
+        if len(self._tf_cache) > self._tf_cache_size:
+            self._tf_cache.popitem(last=False)
+        return docs, tfs
+
+    def _decode_doc_tf(self, term: str) -> tuple[list[int], list[int]]:
+        """get_doc_tf 的核心路徑：從 mmap 直接解出 (doc_nums, tfs)，不經快取。"""
+        entry = self._load_lexicon().get(term)
+        if entry is None:
+            return [], []
+        df, offset, length = entry
+        mm = self._postings_mm()
+        end = offset + length
+        (block_df,) = struct.unpack_from(">I", mm, offset)
+        if block_df != df:
+            raise ValueError(f"postings block of {term!r}: df header {block_df} != lexicon {df}")
+        pos = offset + 4
+        docs: list[int] = []
+        tfs: list[int] = []
+        doc = 0
+        for _ in range(df):
+            # Δdoc
+            value = 0
+            shift = 0
+            while True:
+                b = mm[pos]
+                pos += 1
+                value |= (b & 0x7F) << shift
+                if not (b & 0x80):
+                    break
+                shift += 7
+            doc += value
+            # tf
+            value = 0
+            shift = 0
+            while True:
+                b = mm[pos]
+                pos += 1
+                value |= (b & 0x7F) << shift
+                if not (b & 0x80):
+                    break
+                shift += 7
+            docs.append(doc)
+            tfs.append(value)
+            # n_pos
+            n_pos = 0
+            shift = 0
+            while True:
+                b = mm[pos]
+                pos += 1
+                n_pos |= (b & 0x7F) << shift
+                if not (b & 0x80):
+                    break
+                shift += 7
+            # 跳過 n_pos 個 VByte：只掃到最高位為 0 的 byte，不做數值運算
+            for _ in range(n_pos):
+                while mm[pos] & 0x80:
+                    pos += 1
+                pos += 1
+        if pos != end:
+            raise ValueError(f"postings block of {term!r}: decoded to {pos}, expected {end}")
+        return docs, tfs
 
     # ------------------------------------------------------------------
     # HW2 加分接口 stub（T1 / T3）
@@ -575,23 +665,97 @@ class IndexReader:
             hi = bisect_left(vocab, prefix[:-1] + chr(ord(prefix[-1]) + 1), lo)
         return vocab[lo:hi]
 
+    def _load_champions(self, r: int) -> tuple[dict[str, tuple[int, int]], bytes]:
+        """載入並核對 champions.r<r>.*；結果依 r 快取。"""
+        cached = self._champions.get(r)
+        if cached is not None:
+            return cached
+        stem = f"champions.r{r}"
+        paths = {ext: self.output_dir / f"{stem}.{ext}" for ext in ("bin", "tsv", "meta.json")}
+        for path in paths.values():
+            if not path.exists():
+                raise FileNotFoundError(
+                    f"{path} not found; run "
+                    f"`uv run python HW2/src/build_champions.py --index-dir {self.output_dir} --r {r}`"
+                )
+        meta_name = paths["meta.json"].name
+        with paths["meta.json"].open("r", encoding="utf-8") as f:
+            meta = json.load(f)
+        expected = {"r": r, "rule": "(-tf, doc)",
+                    "format": "u32be n + n*(vbyte dgap, vbyte tf)", "N": self.N}
+        for key, want in expected.items():
+            if meta.get(key) != want:
+                raise ValueError(f"{meta_name}: {key} is {meta.get(key)!r}, expected {want!r}")
+        self._check_sources(meta, meta_name, ("lexicon.tsv", "postings.bin"))
+        table: dict[str, tuple[int, int]] = {}
+        with paths["tsv"].open("r", encoding="utf-8", newline="") as f:
+            for row in csv.reader(f, delimiter="\t"):
+                if int(row[1]) != r:
+                    raise ValueError(f"{paths['tsv'].name}: n of {row[0]!r} is {row[1]}, expected {r}")
+                table[row[0]] = (int(row[2]), int(row[3]))
+        if len(table) != meta.get("count"):
+            raise ValueError(
+                f"{paths['tsv'].name}: {len(table)} rows, meta count is {meta.get('count')!r}"
+            )
+        loaded = (table, paths["bin"].read_bytes())
+        self._champions[r] = loaded
+        return loaded
+
     def get_champions(self, term: str, r: int = 50) -> tuple[list[int], list[int]]:
         """T3 加分：讀取 T2 產出的 champion list（tf 前 r 名）。
 
         Returns:
             (doc_nums, tfs)，doc_nums 嚴格遞增；df ≤ r 時等同 get_doc_tf(term)；
-            term 不存在時回傳 ([], [])。
+            term 不存在時回傳 ([], [])（此時不載入 champion 檔）。
 
         Raises:
             FileNotFoundError: champions.r<r>.* 不存在（請先跑 build_champions.py）。
-            ValueError: meta 與目前的 index 不一致。
+            ValueError: r < 1，或 meta／tsv 與目前的 index 不一致。
         """
-        raise NotImplementedError
+        if r < 1:
+            raise ValueError(f"r must be >= 1, got {r}")
+        entry = self._load_lexicon().get(term)
+        if entry is None:
+            return [], []
+        table, data = self._load_champions(r)
+        df = entry[0]
+        if df <= r:
+            return self.get_doc_tf(term)
+        loc = table.get(term)
+        if loc is None:
+            raise ValueError(f"champions.r{r}.tsv: missing {term!r} (df {df} > r)")
+        offset, length = loc
+        end = offset + length
+        (n,) = struct.unpack_from(">I", data, offset)
+        if n != r:
+            raise ValueError(f"champions.r{r}.bin: block of {term!r} has n={n}, expected {r}")
+        pos = offset + 4
+        docs: list[int] = []
+        tfs: list[int] = []
+        doc = 0
+        for _ in range(n):
+            gap, pos = decode_vbyte(data, pos)
+            tf, pos = decode_vbyte(data, pos)
+            doc += gap
+            docs.append(doc)
+            tfs.append(tf)
+        if pos != end:
+            raise ValueError(f"champions.r{r}.bin: block of {term!r} decoded to {pos}, expected {end}")
+        return docs, tfs
 
     def set_doc_tf_cache(self, maxsize: int) -> None:
-        """T3 加分：設定 get_doc_tf 的 LRU 快取大小；0 = 關閉（預設）。重設時清空快取。"""
-        raise NotImplementedError
+        """T3 加分：設定 get_doc_tf 的 LRU 快取大小；0 = 關閉（預設）。重設時清空快取與計數。
+
+        Raises:
+            ValueError: maxsize < 0。
+        """
+        if maxsize < 0:
+            raise ValueError(f"maxsize must be >= 0, got {maxsize}")
+        self._tf_cache_size = maxsize
+        self._tf_cache.clear()
+        self._tf_hits = 0
+        self._tf_misses = 0
 
     def doc_tf_cache_info(self) -> tuple[int, int]:
         """T3 加分：回傳 get_doc_tf 快取的 (hits, misses)。"""
-        raise NotImplementedError
+        return self._tf_hits, self._tf_misses
