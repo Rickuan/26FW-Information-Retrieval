@@ -195,7 +195,7 @@ hits  = rank(qtf, cands, reader)      # T6 → T7 輸出
 
 - **作業要求**：支援單一關鍵字（`Microsoft`）、自由文字（`United States government`）、簡單 Boolean（`open source AND Linux`、`software engineer OR project manager`）。
 - **做法**
-  1. 先用大寫的 `AND`／`OR` 把原始字串切成運算元，再對每個運算元呼叫 `Preprocessor.process`。
+  1. lexer 切出 token 與字元位置（只有獨立的大寫 `AND`／`OR` 是運算子），再以遞迴下降解析；每個運算元呼叫一次 `Preprocessor.process`。
   2. 優先序：AND 高於 OR，最低要求不支援括號。
   3. 產出一個小 AST：`Term`、`And[...]`、`Or[...]`。單一關鍵字和自由文字都可以視為「沒有運算子的 query」。
   4. 同時保留「所有評分 term 及其 query tf」，給 T6 使用。
