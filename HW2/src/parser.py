@@ -29,9 +29,9 @@ class Phrase:
 
 @dataclass
 class Near:
-    left: Term
-    right: Term
-    k: int  # linux /5 kernel：兩邊 term 的位置差 ≤ k，不分先後
+    left: Phrase   # 單一 token 視為長度 1 的 Phrase（linux → Phrase(['linux'], [1])）
+    right: Phrase
+    k: int  # 兩段 phrase 位置區間之間的間隔 ≤ k，不分先後；位置含 stopword 空洞
 
 
 @dataclass

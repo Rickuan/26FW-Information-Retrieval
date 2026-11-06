@@ -80,7 +80,7 @@ class Preprocessor:
 # T4 — HW2/src/parser.py（dataclass 是真正的程式碼）
 Term(tokens: list[str])                             # 沒加引號的運算元，隱含 AND
 Phrase(tokens: list[str], positions: list[int])     # "..."，positions 取自 process，保留 stopword 空洞
-Near(left: Term, right: Term, k: int)               # linux /5 kernel
+Near(left: Phrase, right: Phrase, k: int)           # linux /5 kernel、e-mail /5 server；單一 token 視為長度 1 的 Phrase
 Wildcard(prefix: str)                               # comput*，只做 casefold，不做 stem
 Not(child: Node); And(children: list[Node]); Or(children: list[Node])
 Node = Term | Phrase | Near | Wildcard | Not | And | Or
@@ -88,15 +88,17 @@ Node = Term | Phrase | Near | Wildcard | Not | And | Or
 def parse(query: str, pre: Preprocessor) -> Node | None: ...
     # 單一遞迴下降 parser；空 query 或整棵樹都是空的回傳 None
     # 優先序 NOT > AND > OR；括號、phrase、/k、* 由 T4b 加入同一個 parser
-    # 引號或括號沒有配對 → 拋 ValueError，訊息包含字元位置
+    # 拋 ValueError，訊息包含字元位置（從 0 起算）：引號或括號沒有配對、單獨的 *（prefix 為空）、/0
+    # Near 的兩邊各自經過 process 後是 Phrase，可以有多個 token（e-mail /5 server 合法）
 def expand(node: Node | None, reader: IndexReader, limit: int = 100) -> Node | None: ...
-    # Wildcard → 多個 Term 的 Or（依 df 取前 limit 個，超過時警告）；沒有 Wildcard 時原樣回傳
+    # Wildcard → 多個 Term 的 Or：依 (-df, term) 排序取前 limit 個，超過時警告一次（訊息含總數）；只有 1 個時是 Term
+    # 展開後為空就移除並警告，整棵樹因此變空時回傳 None；不修改傳入的樹；沒有 Wildcard 時原樣回傳
 def query_terms(node: Node) -> Counter[str]: ...
     # 評分用 term 與 query tf；Phrase、Near 的 token 都計入；跳過 Not 的子樹；遇到 Wildcard 拋 ValueError
     # 純 NOT（例如 NOT linux）→ 回傳空的 Counter()
 
 # T4b — HW2/src/positional.py
-def position_match(node: Phrase | Near, reader: IndexReader) -> set[int]: ...   # 用 get_postings 的 positions
+def position_match(node: Phrase | Near, reader: IndexReader) -> set[int]: ...   # 用 get_postings 的 positions；Near：兩邊各自找出 phrase 的位置區間 [start, end]，兩段區間之間的間隔（後段 start − 前段 end）在 1..k 就命中，不分左右順序、重疊不算，位置含 stopword 空洞
 
 # T5 — HW2/src/boolean.py
 def evaluate(node: Node, reader: IndexReader) -> set[int] | None: ...
@@ -120,7 +122,7 @@ def rank(qtf: Counter[str], candidates: set[int] | None,
 ```python
 # T1 加分 — writer.py
 IndexReader.vocabulary() -> list[str]                    # 排序過的全部 term（快取，不可修改）
-IndexReader.prefix_terms(prefix: str) -> list[str]       # 排序 list + bisect
+IndexReader.prefix_terms(prefix: str) -> list[str]       # 排序 list + bisect；prefix 是空字串時拋 ValueError
 # T2 加分 — weighting.py、build_norms.py、build_champions.py
 formula(scheme: str = "ltc") -> str                       # 寫入／核對 meta 的 formula
 build_norms(index_dir, scheme: str = "ltc") -> None      # CLI --scheme X（單邊）；n 方案拋 ValueError
@@ -136,10 +138,10 @@ suggest_soundex(term: str, reader, limit: int = 5) -> list[str]
 ```
 
 ### 查詢流程
-每個 query 固定依序經過以下五步。`parse` 回傳 `None` 時直接輸出空結果，後面的步驟都不呼叫。
+每個 query 固定依序經過以下五步。`parse` 或 `expand` 回傳 `None` 就停止：直接輸出空結果，後面的步驟都不呼叫（例如 `computing*` 展開後沒有任何 term，`expand` 回傳 `None`；`evaluate` 不接受 `None`）。
 ```python
-node  = parse(query, pre)             # T4；pre = Preprocessor.from_config(metadata["preprocessor"])
-node  = expand(node, reader)          # T4；沒有 Wildcard 時原樣回傳
+node  = parse(query, pre)             # T4；pre = Preprocessor.from_config(metadata["preprocessor"])；None → 停止
+node  = expand(node, reader)          # T4；沒有 Wildcard 時原樣回傳；None → 停止
 cands = evaluate(node, reader)        # T5；None = 不過濾
 qtf   = query_terms(node)             # T4
 hits  = rank(qtf, cands, reader)      # T6 → T7 輸出
@@ -204,7 +206,11 @@ hits  = rank(qtf, cands, reader)      # T6 → T7 輸出
   - 空節點規則在樹上處理：
     - 空的 `Term`／`Phrase` 從父節點移除，並印出警告
     - 沒有 child 的 `And`／`Or` 也移除；只剩一個 child 時攤平
+    - 同類型的巢狀節點合併：`And([And([a, b]), c])` → `And([a, b, c])`
     - `Not` 的 child 是空的就移除這個 `Not`
+    - 只有一個 token 的 phrase（`"linux"`）變成 `Term`；Near 的兩邊除外，單一 token 仍是長度 1 的 `Phrase`
+    - Near 的一側是空的：整個 Near 由另一側取代並發出警告；另一側只有 1 個 token 時變成 `Term`（`the /3 linux` → `Term(['linux'])`），多個 token 時保留為 `Phrase`，不轉成 `Term`，以免失去相鄰條件（`"open source" /3 the` → `Phrase(['open', 'sourc'], [1, 2])`）
+    - Wildcard 展開後沒有任何 term（例如 `computing*`）：由 `expand` 移除並發出警告
     - 整棵樹都是空的就回傳 `None`
   - 只有一個遞迴下降 parser，接口是 `parse(query, pre)`。T4a／T4b 只代表實作順序與 commit 切分：
     - T4a（核心）：`Term`／`And`／`Or`、優先序、空節點規則
@@ -213,7 +219,7 @@ hits  = rank(qtf, cands, reader)      # T6 → T7 輸出
     測試分為核心（`t4.test.py`）與加分（`t4_bonus.test.py`）兩組，T4b 合併後核心測試仍要全部通過。見 `T4.md`。
 - **輸出約定**
   - **純 NOT**（例如 `NOT linux`）：`parse` 回傳 `Not(...)`；`evaluate` 回傳 `set(range(N))` 扣掉 X 的結果；`query_terms` 回傳空的 `Counter()`。
-  - **引號或括號沒有配對**：`parse` 拋出 `ValueError`，訊息包含字元位置（從 0 起算），例如 `linux)` 的位置是 5。
+  - **語法錯誤**：`parse` 拋出 `ValueError`，訊息包含字元位置（從 0 起算）。會拋錯的情況：引號或括號沒有配對（例如 `linux)` 的位置是 5）、單獨的 `*`（prefix 為空）、`/0`。Near 的一側有多個 token（例如 `e-mail /5 server`）不是錯誤。
 - **對應接口**：`Preprocessor.process`（`tokenizer.py` `Preprocessor.process`），回傳 `list[(position, term)]`。position 在過濾 stopword 前編號，空洞會保留。
 
 ### T5 Boolean merge（AND／OR）
@@ -275,10 +281,10 @@ hits  = rank(qtf, cands, reader)      # T6 → T7 輸出
   - TA 無法執行時可能要當面 demo：README 要寫清楚 `uv sync` 和如何取得 index。index 在 gitignore 中，要決定是否放進 zip。
 - **配合加分項**（預設行為不變）：
   - **SMART（T2 加分）**：加上 `--scheme` 參數（預設 `ltc.ltc`），傳給 `rank`，並把方案寫進輸出檔名。
-  - **T4b 語法**：沒有接口變動，`parse(query, pre)` 合併 T4b 後就自動支援新語法。`parse` 拋出的 `ValueError`（引號或括號沒有配對）要印出訊息並以非 0 結束，不印 traceback。
+  - **T4b 語法**：沒有接口變動，`parse(query, pre)` 合併 T4b 後就自動支援新語法。`parse` 拋出的 `ValueError`（引號或括號沒有配對、單獨的 `*`、`/0`）要印出訊息並以非 0 結束，不印 traceback。`parse` 或 `expand` 回傳 `None` 時輸出空結果（見「查詢流程」）。
   - **純 NOT 的 query**：`node` 不是 `None` 但 `qtf` 是空的。純 NOT 的輸出方式由 T6／T7 負責人決定。
   - **警告**：把 `parse` 與 `expand` 發出的警告（空運算元、wildcard 超過上限等）印到 stderr，不混進 ranked list。
-  - **拼字建議（T4b）**：對每個 query token 呼叫 `s = spelling.suggest(token, reader)`。以下任一條件成立時，印出 `Did you mean: ...`，顯示前 3 個建議（`s[:3]`），不自動替換：
+  - **拼字建議（T4b）**：對每個 query token 呼叫 `s = spelling.suggest(token, reader)`。`s` 是空 list 時不觸發；`s` 非空且以下任一條件成立時，印出 `Did you mean: ...`，顯示前 3 個建議（`s[:3]`），不自動替換：
     - 原詞的 df == 0
     - 最佳建議的 df ≥ 原詞 df × 10，即 `reader.df(s[0]) >= reader.df(token) * 10`
 
@@ -295,12 +301,12 @@ CP 值最高的是 phrase／proximity 和權重方案變體：前者 HW1 的 pos
 | 優先 | 項目 | 負責任務 | 作業對應 | 做法 | 可重用的 HW1 接口 | 注意 |
 | --- | --- | --- | --- | --- | --- | --- |
 | 1 | Phrase query（`"open source"`） | T4（`Phrase`、`position_match`）；T5 呼叫 | 複雜查詢，Ch.2 | 先 AND 取候選，再比對 positions：各 term 的位置差要等於它們在 query 內的位置差 | `get_postings`（含 positions）、`process` 回傳的 position | stopword 空洞在 index 與 query 都會保留，直接比位置差即可 |
-| 2 | Proximity（`linux /5 kernel`） | T4（`Near`、`position_match`）；T5 呼叫 | 複雜查詢，Ch.2 | 兩個 position 列表做雙指標，找距離 ≤ k 的配對 | 同上 | 距離以含 stopword 的 token 位置計算，文件中要說明 |
+| 2 | Proximity（`linux /5 kernel`、`e-mail /5 server`） | T4（`Near`、`position_match`）；T5 呼叫 | 複雜查詢，Ch.2 | 兩邊都是 `Phrase`：各自找出位置區間，兩段區間之間的間隔 ≤ k 就命中，不分左右順序 | 同上 | 距離以 index 的位置計算，含 stopword 空洞；重疊不算命中；文件中要說明 |
 | 3 | 權重方案變體（SMART：ltc.ltc、lnc.ltc、bnn 等） | T2（`weight`、`get_norms` 的 scheme）；T6 增加 scheme 參數 | Ch.6 | 把 tf、idf、normalization 三個字母各自實作成函式，以 `--scheme lnc.ltc` 切換 | `weighting.weight()` | doc 端每改一種方案，norm 就要重算一份，檔名帶 scheme（`doc_norms.<scheme>.bin`） |
 | 4 | 多運算子與括號（`(A OR B) AND NOT C`） | T4（T4b）；T5 處理 `Not` | Ch.2–3 | 在同一個遞迴下降 parser 加入 NOT 與括號，優先序 NOT > AND > OR；NOT 以 `set(range(N))` 做集合差 | T4 的 AST、T5 的 merge | 純 `NOT x` 沒有評分 term；純 NOT 的輸出方式由 T6／T7 負責人決定（見「已知限制」） |
 | 5 | Skip pointer 加速 AND | T5 | Ch.2 | T5 直接使用 `intersect_with_skips`，並記錄比較次數對照 `intersect_basic` | `skip_builder.py` `build_skip_list`、`intersect_with_skips` | skip 每次查詢重建，成本 O(df)；要實測確認真的變快才寫進文件 |
-| 6 | Wildcard（`comput*`） | T4（`Wildcard`、`expand`）；T1 提供 `prefix_terms` | Ch.3 | 用排序 list + bisect 做 prefix 展開，依 df 取前 100 個 term（超過時警告），再以 OR 處理 | 實測 `prefix_terms('a')` 約 0.1 ms、`vocabulary()` 約占 4.6 MB；HW1 的 `RadixTrie` 建置約 1.3 s，所以選用 bisect | dictionary 已經 stem 過：prefix 要對 stem 後的字串比對，且 prefix 本身不能再 stem |
-| 7 | 拼字更正 | T4（`suggest`）；T1 提供 `vocabulary`；T7 顯示 | Ch.3 | 原詞 df == 0，或最佳建議的 df ≥ 原詞 df × 10 時，用 bigram 篩候選、Damerau 距離排序，df 決定同分時的次序；顯示前 3 個 | dictionary、T1 的 `df()` | dictionary 是 stem 後的形式，只顯示「Did you mean」，不自動替換 |
+| 6 | Wildcard（`comput*`） | T4（`Wildcard`、`expand`）；T1 提供 `prefix_terms` | Ch.3 | 用排序 list + bisect 做 prefix 展開，依 `(-df, term)` 取前 100 個 term（超過時警告，訊息含總數），再以 OR 處理 | 實測 `prefix_terms('a')` 約 0.1 ms、`vocabulary()` 約占 4.6 MB；HW1 的 `RadixTrie` 建置約 1.3 s，所以選用 bisect | dictionary 已經 stem 過：prefix 要對 stem 後的字串比對，且 prefix 本身不能再 stem |
+| 7 | 拼字更正 | T4（`suggest`）；T1 提供 `vocabulary`；T7 顯示 | Ch.3 | `suggest` 非空，且原詞 df == 0 或最佳建議的 df ≥ 原詞 df × 10 時，用 bigram 篩候選、Damerau 距離排序，df 決定同分時的次序；顯示前 3 個 | dictionary、T1 的 `df()` | dictionary 是 stem 後的形式，只顯示「Did you mean」，不自動替換 |
 | 8a | 不精確 top-k：champion list | T2（建置，已完成）、T3（`get_champions`）；T6 使用（`champion_r`） | Ch.7 | 每個 df > r 的 term 依 `(-tf, doc)` 預存前 r 名的 doc（預設 r = 50，共 15,755 個 term，建置約 15 s），存成 `champions.r50.{bin,tsv,meta.json}` | T3；meta 核對共用 `IndexReader._check_sources` | 結果會跟精確 cosine 不同，必須是可關閉的選項，預設關閉 |
 | 8b | 不精確 top-k：index elimination | T6 | Ch.7 | 只用 idf 高於門檻的 term | T1 的 `df()` | 同上 |
 | 9 | Web UI 與 term highlighting | T7 | 介面 | Flask／FastAPI 單頁；快速版可用 Streamlit | `doc_map`（URL、TREC ID） | index 沒有存原文與字元 offset，highlight 要回 WARC 重讀文件，成本最高 |
