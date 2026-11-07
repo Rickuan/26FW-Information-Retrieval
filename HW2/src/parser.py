@@ -6,6 +6,7 @@ T4a 先做 Term、And、Or；T4b 再加入 Phrase、Near、Wildcard、Not 與括
 """
 from __future__ import annotations
 
+import copy
 import re
 import warnings
 from collections import Counter
@@ -99,26 +100,15 @@ def _lex(query: str) -> list[Token]:
 # ---------------------------------------------------------------------------
 # Parser（遞迴下降）
 # ---------------------------------------------------------------------------
-_BONUS_SYNTAX = {
-    "NOT": "NOT operator",
-    "(": "parentheses",
-    ")": "parentheses",
-    "PHRASE": "quoted phrase",
-    "WILDCARD": "wildcard (prefix*)",
-    "NEAR": "proximity (/k)",
-}
-# 能開始一個 unary 的 token：出現在運算元之後時視為隱含 AND（T4b）。
-# T4a 中連續的 WORD 已在 primary 合併，所以這裡只會碰到加分語法。
-_UNARY_START = {"WORD", "NOT", "(", "PHRASE", "WILDCARD"}
-
-
-def _unsupported(tok: Token) -> NotImplementedError:
-    kind, text, pos = tok
-    return NotImplementedError(f"T4b: {_BONUS_SYNTAX[kind]} not implemented yet ({text!r} at position {pos})")
+# 能開始一個 unary 的 token：出現在運算元之後時視為隱含 AND（linux NOT windows = linux AND NOT windows）。
+# NEAR 也算：前面沒有可當 side 的運算元時（例如 (a) /5 b），它的左側是空的，交給 _prune 的 Near 規則。
+_UNARY_START = {"WORD", "NOT", "(", "PHRASE", "WILDCARD", "NEAR"}
+_EMPTY_WARNING = "empty operand removed from query (only stopwords or a missing operand)"
 
 
 class _Parser:
-    """or := and ("OR" and)*；and := unary (["AND"] unary)*；primary := WORD+（T4a）。"""
+    """or := and ("OR" and)*；and := unary (["AND"] unary)*；unary := "NOT" unary | primary；
+    primary := side [NEAR side] | "(" or ")" | WILDCARD；side := WORD+ | PHRASE。"""
 
     def __init__(self, tokens: list[Token], pre: Preprocessor):
         self.tokens = tokens
@@ -136,8 +126,8 @@ class _Parser:
         node = self.parse_or()
         tok = self.peek()
         if tok is not None:
-            # T4a 走到這裡只可能是加分語法（例如多出來的 ")"）；T4b 改成 ValueError 等處理
-            raise _unsupported(tok)
+            # parse_or 只會停在 ")"：其餘 token 都會被 parse_and／parse_primary 吃掉
+            raise ValueError(f"unmatched ')' at position {tok[2]}")
         return node
 
     def parse_or(self) -> Node:
@@ -156,41 +146,119 @@ class _Parser:
         return children[0] if len(children) == 1 else And(children)
 
     def parse_unary(self) -> Node:
-        tok = self.peek()
-        if tok is not None and tok[0] == "NOT":
-            raise _unsupported(tok)  # T4b
+        if self.peek_kind() == "NOT":
+            self.i += 1
+            return Not(self.parse_unary())  # NOT 後面沒有運算元 → Not(Term([]))，由 _prune 移除
         return self.parse_primary()
 
     def parse_primary(self) -> Node:
         tok = self.peek()
-        if tok is not None and tok[0] in _BONUS_SYNTAX:
-            raise _unsupported(tok)  # T4b：(、PHRASE、WILDCARD、NEAR
-        words: list[str] = []
-        while self.peek_kind() == "WORD":
-            words.append(self.tokens[self.i][1])
+        kind = tok[0] if tok else None
+        if kind == "(":
             self.i += 1
-        # 少了運算元（運算子相鄰、開頭或結尾）時 words 是空的 → Term([])，交給 _prune
-        return Term([t for _, t in self.pre.process(" ".join(words))]) if words else Term([])
+            node = self.parse_or()
+            if self.peek_kind() != ")":
+                raise ValueError(f"unmatched '(' at position {tok[2]}")
+            self.i += 1
+            return node
+        if kind == "WILDCARD":
+            self.i += 1
+            prefix = tok[1].rstrip("*")
+            if not prefix:
+                raise ValueError(f"wildcard without a prefix {tok[1]!r} at position {tok[2]}")
+            return Wildcard(prefix.casefold())  # 只做 casefold，不做 stem
+        # side [NEAR side]；side 可能是空的（運算子相鄰、開頭或結尾，或 NEAR 前沒有 side）
+        left = self.parse_side()
+        if self.peek_kind() != "NEAR":
+            if left is None:
+                return Term([])  # 少了運算元 → 空的 Term，交給 _prune
+            if isinstance(left, Phrase):
+                return left  # 單一 token 的 Phrase 由 _prune 簡化成 Term
+            return Term(left[0])
+        near_tok = self.tokens[self.i]
+        self.i += 1
+        k = int(near_tok[1][1:])
+        if k == 0:
+            raise ValueError(f"proximity distance must be at least 1: {near_tok[1]!r} at position {near_tok[2]}")
+        right = self.parse_side()
+        return Near(self._as_phrase(left), self._as_phrase(right), k)
+
+    def parse_side(self) -> Phrase | tuple[list[str], list[int]] | None:
+        """WORD+ → (tokens, positions)；PHRASE → Phrase；都不是 → None（不消耗 token）。
+
+        WORD+ 先回傳 tuple，等看到後面有沒有 NEAR 再決定是 Term 還是 Near 的一側。
+        """
+        kind = self.peek_kind()
+        if kind == "PHRASE":
+            _, text, pos = self.tokens[self.i]
+            if len(text) < 2 or not text.endswith('"'):
+                raise ValueError(f"unmatched '\"' at position {pos}")
+            self.i += 1
+            toks = self.pre.process(text[1:-1])
+            return Phrase([t for _, t in toks], [p for p, _ in toks])
+        if kind == "WORD":
+            words: list[str] = []
+            while self.peek_kind() == "WORD":
+                words.append(self.tokens[self.i][1])
+                self.i += 1
+            toks = self.pre.process(" ".join(words))
+            return [t for _, t in toks], [p for p, _ in toks]
+        return None
+
+    @staticmethod
+    def _as_phrase(side: Phrase | tuple[list[str], list[int]] | None) -> Phrase:
+        """Near 的一側一律是 Phrase（單一 token 是長度 1 的 Phrase）；空的一側是 Phrase([], [])。"""
+        if side is None:
+            return Phrase([], [])
+        if isinstance(side, Phrase):
+            return side
+        return Phrase(side[0], side[1])
 
 
 # ---------------------------------------------------------------------------
 # 空節點規則
 # ---------------------------------------------------------------------------
+def _warn_empty() -> None:
+    warnings.warn(_EMPTY_WARNING, stacklevel=3)
+
+
 def _prune(node: Node) -> Node | None:
     """空節點規則（在樹上處理），回傳新的樹；整棵樹都是空的時回傳 None。
 
-    - 空的 Term 移除，每移除一個警告一次（根節點本身是空的也算）
+    - 空的 Term／Phrase 移除，每移除一個警告一次（根節點本身是空的也算）
     - 沒有 child 的 And／Or 移除；只剩一個 child 時攤平成那個 child
     - 同類型的巢狀節點合併：And([And([a, b]), c]) → And([a, b, c])（T4.md §4.4 D3）
     - Not 的 child 是空的就移除這個 Not
-    Phrase、Near、Wildcard 的規則屬於 T4b，目前原樣保留。
+    - 只有一個 token 的 Phrase 簡化成 Term；Near 的兩側除外（仍是長度 1 的 Phrase）
+    - Near 的一側是空的：整個 Near 由另一側取代並警告一次；另一側只有 1 個 token 時是 Term，
+      多個 token 時保留為 Phrase（不能轉成 Term，否則失去相鄰條件）。兩側都空就移除（每側各警告一次）
+    Wildcard 原樣保留；展開成 0 個 term 時的移除由 expand 處理。
     """
     if isinstance(node, Term):
         if not node.tokens:
-            warnings.warn("empty operand removed from query (only stopwords or a missing operand)",
-                          stacklevel=2)
+            _warn_empty()
             return None
         return node
+    if isinstance(node, Phrase):
+        if not node.tokens:
+            _warn_empty()
+            return None
+        if len(node.tokens) == 1:
+            return Term(list(node.tokens))
+        return node
+    if isinstance(node, Near):
+        left, right = node.left, node.right
+        if left.tokens and right.tokens:
+            return node
+        if not left.tokens and not right.tokens:
+            _warn_empty()
+            _warn_empty()
+            return None
+        _warn_empty()
+        side = left if left.tokens else right
+        if len(side.tokens) == 1:
+            return Term(list(side.tokens))
+        return side
     if isinstance(node, (And, Or)):
         kind = type(node)
         children: list[Node] = []
@@ -210,7 +278,7 @@ def _prune(node: Node) -> Node | None:
     if isinstance(node, Not):
         child = _prune(node.child)
         return None if child is None else Not(child)
-    # Phrase、Near、Wildcard：T4b
+    # Wildcard
     return node
 
 
@@ -232,12 +300,13 @@ def parse(query: str, pre: Preprocessor) -> Node | None:
 
     空節點規則（在樹上處理）：空的 Term／Phrase 從父節點移除並發出警告；
     沒有 child 的 And／Or 移除，只剩一個 child 時攤平；Not 的 child 是空的就移除該 Not。
+    單一 token 的 Phrase 變成 Term（Near 的兩側除外）；Near 一側為空時由另一側取代並警告。
 
     Returns:
         AST 根節點；空 query 或整棵樹都是空的時回傳 None。
 
     Raises:
-        ValueError: 引號或括號沒有配對，訊息指出字元位置。
+        ValueError: 引號或括號沒有配對、單獨的 *（prefix 為空）、/0，訊息指出字元位置（從 0 起算）。
     """
     if not query.strip():
         return None
@@ -252,9 +321,39 @@ def expand(node: Node | None, reader: IndexReader, limit: int = 100) -> Node | N
     """
     if node is None:
         return None
-    if _contains_wildcard(node):
-        raise NotImplementedError("T4b: wildcard expansion is not supported yet")
+    if not _contains_wildcard(node):
+        return node  # 原樣回傳同一個物件（T4a）
+    # 先整棵深拷貝：回傳的樹與輸入不共用任何可變節點，呼叫端改動結果也不會影響原樹
+    return _prune_expanded(_expand_node(copy.deepcopy(node), reader, limit))
+
+
+def _expand_node(node: Node, reader: IndexReader, limit: int) -> Node | None:
+    """把 Wildcard 換成 Or／Term；展開成 0 個 term 的 Wildcard 回傳 None（並警告）。"""
+    if isinstance(node, Wildcard):
+        cands = reader.prefix_terms(node.prefix)  # parse 已擋掉空的 prefix
+        if not cands:
+            warnings.warn(f"wildcard {node.prefix}* matched no term in the dictionary; removed from query",
+                          stacklevel=4)
+            return None
+        top = sorted(cands, key=lambda t: (-reader.df(t), t))[:limit]
+        if len(cands) > limit:
+            warnings.warn(f"wildcard {node.prefix}* matched {len(cands)} terms; "
+                          f"using the top {limit} by df", stacklevel=4)
+        if not top:  # limit < 1
+            return None
+        return Term([top[0]]) if len(top) == 1 else Or([Term([t]) for t in top])
+    if isinstance(node, (And, Or)):
+        kids = [e for c in node.children if (e := _expand_node(c, reader, limit)) is not None]
+        return type(node)(kids)
+    if isinstance(node, Not):
+        child = _expand_node(node.child, reader, limit)
+        return None if child is None else Not(child)
     return node
+
+
+def _prune_expanded(node: Node | None) -> Node | None:
+    """展開後再跑一次 _prune（攤平、同類型合併）；parse 已移除空的運算元，這裡不會再發出空運算元警告。"""
+    return None if node is None else _prune(node)
 
 
 def query_terms(node: Node) -> Counter[str]:
