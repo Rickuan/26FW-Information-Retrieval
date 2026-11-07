@@ -91,18 +91,24 @@ class Preprocessor:
         self.stemmer = PorterStemmer() if stem else None
         self.lemmatizer = load_lemmatizer() if lemma else None
 
+    def normalize_token(self, tok: str) -> str | None:
+        """process 對單一 token 做的步驟：casefold → stopword（回傳 None）→ lemma 或 stem（只處理 isalpha 的 token）。"""
+        if self.casefold:
+            tok = tok.casefold()
+        if self.stopword and tok.casefold() in self.stops:
+            return None
+        if self.lemma and tok.isalpha():
+            tok = self.lemmatizer.lemmatize(tok)
+        elif self.stem and tok.isalpha():
+            tok = self.stemmer.stem(tok, to_lowercase=self.casefold)
+        return tok
+
     def process(self, text: str):
         res = []
         for pos, tok in enumerate(tokenize(text), start=1):
-            if self.casefold:
-                tok = tok.casefold()
-            if self.stopword and tok.casefold() in self.stops:
-                continue
-            if self.lemma and tok.isalpha():
-                tok = self.lemmatizer.lemmatize(tok)
-            elif self.stem and tok.isalpha():
-                tok = self.stemmer.stem(tok, to_lowercase=self.casefold)
-            res.append((pos, tok))
+            t = self.normalize_token(tok)
+            if t is not None:
+                res.append((pos, t))
         return res
     @classmethod
     def from_config(cls, cfg: dict) -> "Preprocessor":
