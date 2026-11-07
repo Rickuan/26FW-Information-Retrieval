@@ -27,12 +27,12 @@ sim(d_j, q) = \frac{\sum_{i} w_{i,j} \, w_{i,q}}{\sqrt{\sum_{i} w_{i,j}^2} \; \s
 - `build_champions.py`：T2 加分
 - `parser.py`：T4
 - `positional.py`、`spelling.py`：T4b
-- `surface.py`、`build_surface_vocab.py`：T4c（原字詞彙層，計畫中，見 `T4.md` §6.8）
+- `surface.py`、`build_surface_vocab.py`：T4c（原字詞彙層、k-gram、Soundex 分組，已完成，見 `T4.md` §6.8、§9.1.3–§9.1.4）
 - `boolean.py`：T5
 - `rank.py`：T6
 - `search.py`：T7 CLI，尚未建立
 
-T1、T3 改的是 `HW2/src/` 裡從 HW1 複製過來的 `writer.py` 與 `tokenizer.py`，`HW1/` 不動。T4c 會在 `tokenizer.py` 抽出 `Preprocessor.normalize_token`，只是重構，行為不變。
+T1、T3 改的是 `HW2/src/` 裡從 HW1 複製過來的 `writer.py` 與 `tokenizer.py`，`HW1/` 不動。T4c 已在 `tokenizer.py` 抽出 `Preprocessor.normalize_token`，只是重構，行為不變（`t1.test.py` 27/27，見 `done.T1.md` §9.1）。
 
 ## 必做任務
 
@@ -78,7 +78,7 @@ class Preprocessor:
     def from_config(cls, cfg: dict) -> "Preprocessor": ...
         # 嚴格模式：cfg 為 None、{} 或缺 casefold／stopword／stem 時拋 ValueError；只有 lemma 可缺（預設 False）
     def normalize_token(self, tok: str) -> str | None: ...
-        # T4c（計畫中）：process 對單一 token 做的步驟（casefold → stopword 回傳 None → lemma／stem）；process 改成呼叫它，行為不變
+        # T4c：process 對單一 token 做的步驟（casefold → stopword 回傳 None → lemma／stem）；process 改成呼叫它，行為不變
 
 # T4 — HW2/src/parser.py（dataclass 是真正的程式碼）
 Term(tokens: list[str])                             # 沒加引號的運算元，隱含 AND
@@ -144,17 +144,21 @@ build_champions(index_dir, r: int = 50) -> None          # champions.r<r>.{bin,t
 IndexReader.get_champions(term: str, r: int = 50) -> tuple[list[int], list[int]]  # doc 遞增；r < 1、meta／tsv 不符拋 ValueError；檔案不存在拋 FileNotFoundError
 IndexReader.set_doc_tf_cache(maxsize: int) -> None       # 0 = 關閉（預設）
 IndexReader.doc_tf_cache_info() -> tuple[int, int]       # (hits, misses)
-# T4b — spelling.py（T4c 起輸入與回傳都是原字，計畫中，見 T4.md §6.8）
+# T4b — spelling.py（T4c 起輸入與回傳都是原字，見 T4.md §6.8.3、§6.8.5）
 suggest(word: str, reader, limit: int = 5) -> list[str]  # 只提供 Did you mean，不自動替換；原字 k-gram，依 stem 去重
 did_you_mean(word: str, reader, show: int = 3) -> list[str]  # T4c：以原字 df 判斷是否觸發，觸發時回傳 suggest(...)[:show]，否則 []
 soundex(word: str) -> str                                # 只看 ASCII 字母
 suggest_soundex(word: str, reader, limit: int = 5) -> list[str]  # T4c：原字詞彙的同碼原字，依 (-原字 df, 原字) 排序、依 stem 去重
-# T4c — parser.py、surface.py、build_surface_vocab.py（計畫中）
+# T4c — parser.py、surface.py、build_surface_vocab.py
 query_words(query: str, pre: Preprocessor) -> list[str]  # 使用者輸入的原字（tokenize + casefold，略過 stopword、Wildcard、SOUNDEX 參數）
 load_surface(reader) -> SurfaceVocab                     # 讀 HW2/index/surface_vocab.{tsv,meta.json}，依 reader 快取；核對 N、preprocessor、
                                                          # lexicon.tsv／metadata.json 的 sha256（共用 _check_sources）；不存在拋 FileNotFoundError
+                                                         # 實測 0.54 s、75.9 MiB（tracemalloc，不含 lexicon）
 SurfaceVocab.df(word) -> int; SurfaceVocab.stem(word) -> str | None  # 原字 df；原字的 stem（stopword 是 ""）
+SurfaceVocab.kgram(); .match_wildcard(pattern); .soundex_groups()  # 延遲建立並快取：原字 bigram index（0.95 s、32 MiB）、
+                                                         # wildcard 比對（k-gram + regex）、唯一一份 Soundex 分組（0.45 s）
 # CLI：uv run python HW2/src/build_surface_vocab.py [--hw1-dir HW1/output] [--index-dir HW2/index] [--allow-mismatch]
+#   實測 4.41 s（normalize_token × 644,523 為 2.78 s）；surface_vocab.tsv 14,191,438 bytes；一致性例外全部是 0
 ```
 
 ### 查詢流程
@@ -237,7 +241,7 @@ hits  = rank(qtf, cands, reader)      # T6 → T7 輸出
   - 只有一個遞迴下降 parser，接口是 `parse(query, pre)`。T4a／T4b／T4c 只代表實作順序與 commit 切分：
     - T4a（核心）：`Term`／`And`／`Or`、優先序、空節點規則
     - T4b（加分）：在同一個 parser 加入 NOT、括號、phrase、`/k`、結尾的 `*`，以及拼字建議
-    - T4c（加分，計畫中，見 `T4.md` §6.8）：原字詞彙層（`surface_vocab.*`）、任意位置的 `*`、`SOUNDEX(x)` 運算子，拼字建議改用原字
+    - T4c（加分，已完成，見 `T4.md` §6.8、§9.1.4）：原字詞彙層（`surface_vocab.*`）、任意位置的 `*`、`SOUNDEX(x)` 運算子，拼字建議改用原字
 
     測試分為核心（`t4.test.py`）與加分（`t4_bonus.test.py`）兩組，T4b 合併後核心測試仍要全部通過。見 `T4.md`。
 - **輸出約定**
@@ -319,7 +323,7 @@ hits  = rank(qtf, cands, reader)      # T6 → T7 輸出
     - `s` 非空，而且原字 df == 0（`sv.df(word) == 0`），或最佳建議的原字 df ≥ 原字 df × 10（`sv.df(s[0]) >= sv.df(word) * 10`）時觸發，回傳前 3 個（`s[:3]`）
     - 比的是原字 df，不是 `reader.df`
 
-    顯示的是原字（`retreival` → `retrieval`），不是 stem。第一次呼叫要付讀 `surface_vocab.tsv` 與建原字 k-gram index 的成本（建 k-gram 預先量到約 1 s，讀檔時間待實作後量測），單次 CLI 查詢每次都會付一次。
+    顯示的是原字（`retreival` → `retrieval`），不是 stem。第一次呼叫要付讀 `surface_vocab.tsv` 與建原字 k-gram index 的成本：在新的 process 中（lexicon 已載入）實測約 1.6 s（`load_surface` 0.54 s + 建 k-gram 1.06 s + 查詢約 30 ms），之後每次約 10–45 ms；單次 CLI 查詢每次都會付一次。**`did_you_mean` 首次呼叫有約 1.6 s 成本，建議只在結果很少時呼叫**（例如沒有命中或命中篇數很少時才顯示 Did you mean）。
   - **LRU 快取（T3 加分）**：批次模式（`--queries`）可以呼叫 `reader.set_doc_tf_cache(n)` 開啟，預設不開。
 - **對應接口**：`IndexReader.get_doc(n).trec_id`（`writer.py` `IndexReader.get_doc`），只在需要額外顯示 TREC ID 時使用。
 
@@ -336,8 +340,8 @@ CP 值最高的是 phrase／proximity 和權重方案變體：前者 HW1 的 pos
 | 3 | 權重方案變體（SMART：ltc.ltc、lnc.ltc、bnn 等） | T2（`weight`、`get_norms` 的 scheme）；T6 增加 scheme 參數 | Ch.6 | 把 tf、idf、normalization 三個字母各自實作成函式，以 `--scheme lnc.ltc` 切換 | `weighting.weight()` | doc 端每改一種方案，norm 就要重算一份，檔名帶 scheme（`doc_norms.<scheme>.bin`） |
 | 4 | 多運算子與括號（`(A OR B) AND NOT C`） | T4（T4b）；T5 處理 `Not` | Ch.2–3 | 在同一個遞迴下降 parser 加入 NOT 與括號，優先序 NOT > AND > OR；NOT 以 `set(range(N))` 做集合差 | T4 的 AST、T5 的 merge | 純 `NOT x` 沒有評分 term；純 NOT 的輸出方式由 T6／T7 負責人決定（見「已知限制」） |
 | 5 | Skip pointer 加速 AND | T5 | Ch.2 | T5 直接使用 `intersect_with_skips`，並記錄比較次數對照 `intersect_basic` | `skip_builder.py` `build_skip_list`、`intersect_with_skips` | skip 每次查詢重建，成本 O(df)；要實測確認真的變快才寫進文件 |
-| 6 | Wildcard（`comput*`、`*mon`、`co*tion`） | T4（`Wildcard`、`expand`；T4c 的 `surface.py`） | Ch.3 | T4c：在原字詞彙的 bigram k-gram index 上，用 pattern 的固定片段（含邊界 `$`）取交集篩選候選，再用完整 pattern 做 regex post-filter；比對到的原字轉成 stem 並去重，依 `(-df, stem)` 取前 100 個（超過時警告，訊息含去重後的總數），再以 OR 處理 | `surface.py`（原字詞彙與 k-gram，與拼字共用）；T1 的 `df()` | 只有 `*` 是萬用字元，不支援 `?`、`[...]`；沒有任何 bigram 的 pattern（`*x*`）會掃過全部 644,523 個原字（預先量到約 50–80 ms）；`computing*` 會展開成 `comput`。T4b 用的是 `prefix_terms`（bisect），T4c 起不再使用 |
-| 7 | 拼字更正 | T4（`suggest`、`did_you_mean`；T4c 的 `surface.py`）；T7 顯示 | Ch.3 | T4c：原字的 bigram 篩候選（Jaccard ≥ 0.3）→ 排除輸入本身、stopword、與輸入同 stem 的原字 → 依 `(Damerau-OSA, -原字 df, 原字)` 排序 → 依 stem 去重（保留距離最小的原字）；`s` 非空，且原字 df == 0 或最佳建議的原字 df ≥ 原字 df × 10 時顯示前 3 個 | `surface.py`（原字詞彙、原字 df） | 顯示原字（`retreival` → `retrieval`），只顯示「Did you mean」，不自動替換；原字 k-gram 預先量到建置約 1.05 s、約 32 MiB，每個 reader 一次（正式數字以 `T4.md` §9 為準） |
+| 6 | Wildcard（`comput*`、`*mon`、`co*tion`） | T4（`Wildcard`、`expand`；T4c 的 `surface.py`） | Ch.3 | T4c：在原字詞彙的 bigram k-gram index 上，用 pattern 的固定片段（含邊界 `$`）取交集篩選候選，再用完整 pattern 做 regex post-filter；比對到的原字轉成 stem 並去重，依 `(-df, stem)` 取前 100 個（超過時警告，訊息含去重後的總數），再以 OR 處理 | `surface.py`（原字詞彙與 k-gram，與拼字共用）；T1 的 `df()` | 只有 `*` 是萬用字元，不支援 `?`、`[...]`；沒有任何 bigram 的 pattern（`*x*`）會掃過全部 644,523 個原字（實測約 81 ms；一般 pattern 2–30 ms，例如 `*mon` 2.3 ms、`*tion*` 12.8 ms、`a*` 30 ms）；`computing*` 會展開成 `comput`。T4b 用的是 `prefix_terms`（bisect），T4c 起不再使用 |
+| 7 | 拼字更正 | T4（`suggest`、`did_you_mean`；T4c 的 `surface.py`）；T7 顯示 | Ch.3 | T4c：原字的 bigram 篩候選（Jaccard ≥ 0.3）→ 排除輸入本身、stopword、與輸入同 stem 的原字 → 依 `(Damerau-OSA, -原字 df, 原字)` 排序 → 依 stem 去重（保留距離最小的原字）；`s` 非空，且原字 df == 0 或最佳建議的原字 df ≥ 原字 df × 10 時顯示前 3 個 | `surface.py`（原字詞彙、原字 df） | 顯示原字（`retreival` → `retrieval`），只顯示「Did you mean」，不自動替換；原字 k-gram 實測建置 0.95 s、32.1 MiB（峰值 33.0 MiB），每個 reader 一次；`did_you_mean` 第一次呼叫（含讀 tsv）約 1.6 s，之後 `suggest` 約 10–45 ms |
 | 8a | 不精確 top-k：champion list | T2（建置，已完成）、T3（`get_champions`）；T6 使用（`champion_r`） | Ch.7 | 每個 df > r 的 term 依 `(-tf, doc)` 預存前 r 名的 doc（預設 r = 50，共 15,755 個 term，建置約 15 s），存成 `champions.r50.{bin,tsv,meta.json}` | T3；meta 核對共用 `IndexReader._check_sources` | 結果會跟精確 cosine 不同，必須是可關閉的選項，預設關閉 |
 | 8b | 不精確 top-k：index elimination | T6 | Ch.7 | 只用 idf 高於門檻的 term | T1 的 `df()` | 同上 |
 | 9 | Web UI 與 term highlighting | T7 | 介面 | Flask／FastAPI 單頁；快速版可用 Streamlit | `doc_map`（URL、TREC ID） | index 沒有存原文與字元 offset，highlight 要回 WARC 重讀文件，成本最高 |
@@ -390,7 +394,7 @@ CP 值最高的是 phrase／proximity 和權重方案變體：前者 HW1 的 pos
 **已知限制**（要寫進繳交文件）
 
 - **純 NOT 的 query**（例如 `NOT linux`、`NOT (a OR b)`）：`query_terms` 會跳過 `Not` 的子樹，所以沒有可評分的詞，cosine 無法排序。輸出方式由 T6／T7 決定。
-- **拼字建議**（T4c）：在原字詞彙上比對，顯示原字（`retrieval`）。但它不認識語意，正確的罕見詞也可能觸發，例如人名 `linus`（28）會被建議成 `links`（9,251）；短字的對調（`teh` → `the`）在 bigram Jaccard 下篩不進候選，而且 `the` 是 stopword，本來就會被排除。T4b 的版本顯示的是 stem 形式（`retriev`）。
+- **拼字建議**（T4c）：在原字詞彙上比對，顯示原字（`retrieval`）。但它不認識語意，正確的罕見詞也可能觸發，例如人名 `linus`（28）會被建議成 `links`（9,251）；短字的對調（`teh` → `the`）在 bigram Jaccard 下篩不進候選，而且 `the` 是 stopword，本來就會被排除。T4b 的版本顯示的是 stem 形式（`retriev`）。第一次呼叫 `did_you_mean` 要讀 `surface_vocab.tsv` 並建原字 k-gram index，約 1.6 s（之後每次約 10–45 ms），單次 CLI 查詢每次都要付，所以只在結果很少時呼叫。
 - **Wildcard**（T4c）：在原字上比對，比對到的原字再轉成 stem，所以結果可能包含形式上不符合 pattern 的 stem（`computers*` 包含 `comput`）；prefix 超出 stem 的部分時，結果會比只看 stem 時多（`computi*` 包含 `comput`）。展開數量上限是 100，依 df 截斷，超過時發出警告。T4b 的版本只對 stem 比對 prefix，所以 `computing*` 會展開成空的結果。
 - **Soundex**：為人名設計，用在一般檢索中效果有限（見加分表第 11 項）。
 

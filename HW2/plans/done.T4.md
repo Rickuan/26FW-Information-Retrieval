@@ -1,6 +1,6 @@
 # T4 Query parser（核心 T4a、加分 T4b）
 
-> 狀態：T4a、T4b 已完成（§9）。§6.8「原字詞彙層與擴充」是追加的計畫，**尚未實作**；它取代 §6.4 的展開方式與 §6.5 的候選與觸發條件，§2、§3 表中與它衝突的地方以 §6.8 為準。
+> 狀態：T4a、T4b、T4c（§6.8「原字詞彙層與擴充」：資料層、拼字、wildcard、SOUNDEX）都已完成（§9）。§6.8 取代 §6.4 的展開方式與 §6.5 的候選與觸發條件，§2、§3 表中與它衝突的地方以 §6.8 為準。
 >
 > 原狀態：T1（`done.T1.md`）、T2（`done.T2.md`）、T3（`done.T3.md`）已完成，本計畫已依三者的實作紀錄更新上游接口與行號；可以開始實作。行號以 `grep -n` 對照目前工作樹的 `HW2/src/` 確認過。與 `00-overview.md` 不一致的地方一律以總規劃為準，差異列在 §4.4，需要回寫的項目列在 §9.3。
 
@@ -14,8 +14,8 @@ T4 會用到的接口（都已實作，行為依實作紀錄與原始碼確認�
 
 | 接口 | 位置 | 實際行為 | T4 誰用 |
 | --- | --- | --- | --- |
-| `Preprocessor.process(text)` | `tokenizer.py:94-106` | 回傳 `list[(position, term)]`。position 從 1 起算，在過濾 stopword **之前**編號，所以空洞會保留（`"lord of the rings"` → `[(1, 'lord'), (4, 'ring')]`）。只有 `tok.isalpha()` 的 token 才會 stem。 | `parse` |
-| `Preprocessor.from_config(cfg)` | `tokenizer.py:107-124` | 嚴格模式：`cfg` 為 `None`／`{}` 或缺 casefold／stopword／stem 時拋 `ValueError`；只有 lemma 可缺 | 測試、T7 |
+| `Preprocessor.process(text)` | `tokenizer.py:106-112`（T4c 重構前是 `:94-106`；單一 token 的步驟抽成 `normalize_token`，`:94-104`） | 回傳 `list[(position, term)]`。position 從 1 起算，在過濾 stopword **之前**編號，所以空洞會保留（`"lord of the rings"` → `[(1, 'lord'), (4, 'ring')]`）。只有 `tok.isalpha()` 的 token 才會 stem。 | `parse` |
+| `Preprocessor.from_config(cfg)` | `tokenizer.py:113-130`（T4c 重構前是 `:107-124`） | 嚴格模式：`cfg` 為 `None`／`{}` 或缺 casefold／stopword／stem 時拋 `ValueError`；只有 lemma 可缺 | 測試、T7 |
 | `IndexReader.df(term)` | `writer.py:486-493` | 取自 lexicon 的 `(df, offset, length)[0]`；term 不存在回傳 0 | `expand`、`suggest`、測試 |
 | `IndexReader.N` | `writer.py:481-484` | **property**，寫 `reader.N` | 測試 |
 | `IndexReader.__contains__` | `writer.py:473-475` | `term in reader` | 測試 |
@@ -217,7 +217,7 @@ T4b 直接擴充同一個 `parse`，不新增參數，也不另寫 parser。一�
 - `get_postings` 每次呼叫都重新開檔並解出全部 positions（`writer.py:436-450`），高 df 詞（`home`）一次約 24 ms；T4b 不改 `writer.py`，只保證每個 token 只呼叫一次。
 
 ### 6.4 Wildcard（`expand`，`parser.py:78-84`）
-> 已實作的版本。§6.8.4 會把它改成在原字詞彙上比對、支援任意位置的 `*`、改用 `Wildcard(pattern)`；`computing*` 的限制也會隨之解除。
+> T4b 的版本，**已被 §6.8.4 取代**：wildcard 改在原字詞彙上比對、支援任意位置的 `*`、改用 `Wildcard(pattern)`；`computing*` 的限制已解除。本節保留作為歷史紀錄。
 - `Comput*` → `Wildcard('comput')`：只做 casefold，不做 stem。所以 `computing*` 對不到 dictionary 中的 `comput`，會展開成空的結果並發出警告。這是已知限制，要寫進文件。
 - **展開方式**：`reader.prefix_terms(prefix)`（`writer.py:649-666`；空字串會拋 `ValueError`，但 `parse` 已先擋掉 `*`）取得候選，依 `(-df, term)` 排序後取前 `limit` 個（預設 100），組成 `Or([Term([t]) ...])`。`prefix_terms` 回傳的是新的 list，但仍用 `sorted()`，不要原地排序。
   - 超過 `limit` 時發出一次警告，訊息包含總數
@@ -226,7 +226,7 @@ T4b 直接擴充同一個 `parse`，不新增參數，也不另寫 parser。一�
 - 不修改傳入的樹，回傳新的樹；展開後再跑一次 `_prune`。
 
 ### 6.5 拼字更正（`suggest`，`spelling.py:13-20`）
-> 已實作的版本。§6.8.3 會把候選、輸入輸出與觸發條件都改成原字（`retreival` → `retrieval`），並刪除 stem 的 k-gram index。
+> T4b 的版本，**已被 §6.8.3 取代**：候選、輸入輸出與觸發條件都改成原字（`retreival` → `retrieval`），stem 的 k-gram index 已刪除。本節保留作為歷史紀錄。
 - **輸入**：dictionary 形式的 token（`process` 之後的結果）。
 - **候選與排序**：
   - 用 `vocabulary()` 建立 bigram（前後加 `$`）的 k-gram index，第一次呼叫時建立並依 reader 快取。`writer.py` 不動，所以快取放在 `spelling.py` 的模組層級（例如以 reader 為 key 的 `weakref.WeakKeyDictionary`）。`vocabulary()` 是共用的 list，只讀不改。
@@ -240,7 +240,7 @@ T4b 直接擴充同一個 `parse`，不新增參數，也不另寫 parser。一�
 - **預先量測**（暴力掃描版，k-gram index 會更快）：`suggest('retreival')` 的前三名是 `retreiv`、`retrial`、`retriev`；`suggest('retreiv')` 的第一名是 `retriev`（df 409）。
 
 ### 6.6 Soundex（`spelling.py:23-30`，優先度低）
-> 已實作的版本。`soundex()` 不改；§6.8.5 會把 `suggest_soundex` 改到原字詞彙上（只維護一份對照表，依 stem 去重、回傳原字），並新增 `SOUNDEX(x)` 運算子，把同碼的原字全部擴展進 query。
+> T4b 的版本。`soundex()` 不改；`suggest_soundex` **已依 §6.8.5 改到原字詞彙上**（只維護一份對照表，依 stem 去重、回傳原字），並新增了 `SOUNDEX(x)` 運算子，把同碼的原字全部擴展進 query。
 - 標準 American Soundex：保留第一個字母，其餘字母轉成數字；h／w 不隔開相同的數字。
 - `suggest_soundex` 只比對純字母的 term，依 `(-df, term)` 排序，不含 term 本身。Soundex 碼的對照表同樣依 reader 快取在 `spelling.py`。
 - **stem 的影響**：Soundex 只看第一個字母加上前三個子音碼，而 stem 通常只去掉字尾，所以多數 stem 和原形同碼（`comput`、`computer` 都是 C513）。但短字被 stem 時可能落到不同的碼。dictionary 約 57 萬個 term，Soundex 碼只有約 9 千種，碰撞非常多，所以只能當作輔助建議。
@@ -298,7 +298,7 @@ T4b 直接擴充同一個 `parse`，不新增參數，也不另寫 parser。一�
   - `'retriev' in suggest_soundex('retreiv', reader)`（兩者都是 R361）
 - [ ] **計時**（寫進 §9.1，不設門檻）：k-gram index 的建置時間與記憶體（`tracemalloc`）、`suggest` 單次時間、`position_match('"open source"')` 與 `linux /5 kernel` 的時間
 
-### 6.8 原字詞彙層與擴充（T4c，計畫中，尚未實作）
+### 6.8 原字詞彙層與擴充（T4c，已實作，見 §9.1.3、§9.1.4）
 T4b 完成後的追加項目。它取代 §6.4 的展開方式、§6.5 的候選與觸發條件，並新增 `SOUNDEX(x)` 運算子。§6.1–§6.3 的語法與 `position_match` 不變。本節的數字都是用一次性的唯讀腳本，在真實的 `HW1/output` 與 `HW2/index` 上預先量出來的（本機 WSL2，各量一次），只用來設計規則與檢查測試本身，不寫死成程式的行為。
 
 **要解決的問題**
@@ -313,7 +313,7 @@ T4b 完成後的追加項目。它取代 §6.4 的展開方式、§6.5 的候選
 1. **檢查來源**（任何一項不符就拋 `ValueError`，不寫任何檔案）：`HW1/output/metadata.json` 的 `N` 等於 `HW2/index` 的 `N`；preprocessor 是 `casefold` 與 HW2 相同、`stopword=False`、`stem=False`、`lemma` 不存在或是 False；`vocab_size` 等於 lexicon 的行數；lexicon 已排序。原因：`00-overview.md`「T1」提醒過 `main.test.py` 會把 `HW1/output` 覆蓋成 100 篇的小 index，用錯來源時建置照樣會成功，只是結果是錯的。
 2. 用 `csv.reader(f, delimiter="\t")` 讀 `HW1/output/lexicon.tsv` 的前兩欄（原字、df）。
 3. **算每個原字的 stem**（§8 G1 已決定：逐 token 規則，而且只能呼叫 Preprocessor 自己的程式）：先用 `Preprocessor.from_config(HW2/index 的 metadata["preprocessor"])` 建立 `pre`，再對**整個原字**呼叫 `pre.normalize_token(word)`，**不經過 `tokenize`**。回傳 `None`（stopword）時，stem 欄位記成空字串。`surface.py` 的 `surface_stem(pre, word) -> str` 只是 `pre.normalize_token(word) or ""` 的薄包裝，**不另外實作** stopword 判斷或 stem，建置與測試都用它。
-   - **`tokenizer.py` 的重構**（T1 的檔案；只是把程式抽出來，行為不變）：目前 `Preprocessor.process`（`tokenizer.py:94-106`）的迴圈內容沒有可以單獨呼叫的方法，所以抽成一個新方法：
+   - **`tokenizer.py` 的重構**（T1 的檔案；只是把程式抽出來，行為不變）：重構前 `Preprocessor.process`（舊行號 `tokenizer.py:94-106`；重構後 `normalize_token` 在 `:94-104`、`process` 在 `:106-112`）的迴圈內容沒有可以單獨呼叫的方法，所以抽成一個新方法：
      ```python
      def normalize_token(self, tok: str) -> str | None:
          """process 對單一 token 做的步驟：casefold → stopword（回傳 None）→ lemma 或 stem（只處理 isalpha 的 token）。"""
@@ -544,7 +544,7 @@ T4b 完成後的追加項目。它取代 §6.4 的展開方式、§6.5 的候選
   - §10.1 第 3 點：「……不必另外建結構，就能當作 wildcard（T4b）的基礎。」改成：「……不必另外建結構。T4b 最初的 wildcard 用它做 prefix 展開；T4 §6.8 之後，wildcard 改在原字詞彙的 k-gram index 上展開，不再呼叫 `prefix_terms`，但它仍是 T1 的公開接口（`t1_bonus` 有測試）。」
   - §6.1 第 74 行的評分面向「query 多樣性（wildcard 的基礎）」：改成「query 多樣性（T4b 最初的 wildcard 使用；§6.8 後改用原字 k-gram）」
   - §10.4 第 4 點「prefix 是對 stem 後的 dictionary 比對……`computing*` 對不到 `comput`（T4b 的已知限制……）」：補上「T4 §6.8 改在原字上比對後，`computing*` 會展開成 `comput`，這個限制已解除；`prefix_terms` 本身的行為不變」
-  - §9（實作紀錄）新增一點：「T4c 在 `tokenizer.py` 抽出 `Preprocessor.normalize_token`，`process` 改成呼叫它，行為不變（`t1.test.py` 的 golden 值與呼叫計數證明）；`indexer.py` 不必改，index 不必重建」。另外，§3／§4 中 `process` 的行號（`tokenizer.py:94-106`）會改變，以實作後的行號為準
+  - §9（實作紀錄）新增一點：「T4c 在 `tokenizer.py` 抽出 `Preprocessor.normalize_token`，`process` 改成呼叫它，行為不變（`t1.test.py` 的 golden 值與呼叫計數證明）；`indexer.py` 不必改，index 不必重建」。另外，§3／§4 中 `process` 的行號（`tokenizer.py:94-106`）已改變：實作後 `normalize_token` 是 `:94-104`、`process` 是 `:106-112`、`from_config` 是 `:113-130`（已回寫 §2 與 `done.T1.md`）
 
 #### 6.8.7 改動範圍
 | 檔案 | 改動 |
@@ -564,65 +564,65 @@ T4b 完成後的追加項目。它取代 §6.4 的展開方式、§6.5 的候選
 執行方式不變：`uv run python HW2/tests/t4_bonus.test.py`。測試前要先執行一次 `uv run python HW2/src/build_surface_vocab.py`。新的測試寫在 `t4_bonus.test.py` 的第 7–10 節；預期值一律由測試內獨立的暴力做法算出，不拿被測函式的結果當預期值。
 
 **7. 原字詞彙層與一致性**
-- [ ] `surface_vocab.tsv` 共 644,523 列資料加上 1 列表頭，已排序；stem 是空字串的有 189 列；meta 的 `count`、`N`、`preprocessor`、`sources` 都正確
-- [ ] **一致性**（測試內重新算，不信任 meta 記錄的數字）：
+- [x] `surface_vocab.tsv` 共 644,523 列資料加上 1 列表頭，已排序；stem 是空字串的有 189 列；meta 的 `count`、`N`、`preprocessor`、`sources` 都正確
+- [x] **一致性**（測試內重新算，不信任 meta 記錄的數字）：
   - 每個 stem 不是空字串的原字，它的 stem 都 `in reader`
   - `reader.vocabulary()` 的每個 term 都至少對應到一個原字
   - `max(原字 df) ≤ reader.df(stem) ≤ Σ 原字 df`
 
   三項的例外都必須是 0。如果有例外，FAIL 訊息列出數量與前 10 個例子。
-- [ ] **與 Preprocessor 一致**：用 `random.Random(42)` 抽 5,000 個原字，加上全部 189 個 stopword。只要 `tokenize(w) == [w]`，就要滿足 `[t for _, t in pre.process(w)] == ([stem] if stem else [])`。抽到 `tokenize` 會改動的原字時跳過並計數，計數寫進訊息（全體中共有 631 個）
-- [ ] **meta 核對**：在 `tempfile` 目錄中用 symlink 指向 `HW2/index` 的 `lexicon.tsv`、`metadata.json`、`surface_vocab.tsv`，再放一份改過的 meta：
+- [x] **與 Preprocessor 一致**：用 `random.Random(42)` 抽 5,000 個原字，加上全部 189 個 stopword。只要 `tokenize(w) == [w]`，就要滿足 `[t for _, t in pre.process(w)] == ([stem] if stem else [])`。抽到 `tokenize` 會改動的原字時跳過並計數，計數寫進訊息（全體中共有 631 個）
+- [x] **meta 核對**：在 `tempfile` 目錄中用 symlink 指向 `HW2/index` 的 `lexicon.tsv`、`metadata.json`、`surface_vocab.tsv`，再放一份改過的 meta：
   - sha256 改錯、`N` 改錯 → `load_surface` 拋 `ValueError`
   - 刪掉 meta → 拋 `FileNotFoundError`
 
   不修改 `HW2/index` 本身。
-- [ ] 建置腳本的來源檢查：把 `--hw1-dir` 指向 `HW2/index`（stem=True）時拋 `ValueError`，而且不會產生任何檔案。輸出目錄用 `--index-dir` 指向 tempfile 目錄
+- [x] 建置腳本的來源檢查：把 `--hw1-dir` 指向 `HW2/index`（stem=True）時拋 `ValueError`，而且不會產生任何檔案。輸出目錄用 `--index-dir` 指向 tempfile 目錄
 
 **8. 拼字（原字）**
-- [ ] `s = suggest('retreival', reader)`：`s[0] == 'retrieval'`（預先量到是第一名），而且 `'retrieved' not in s`、`'retrieve' not in s`。同一個 stem `retriev` 只出現一次，代表的是 OSA 最小的 `retrieval`，不是 df 較高的 `retrieved`（140）、`retrieve`（138）
-- [ ] 去重規則：在去重前的排序結果中，每個 stem 第一次出現的原字，必須正好是 `s` 中代表該 stem 的原字。測試內自己寫 OSA 重算排序
-- [ ] 結果不含 `retreived`、`retreives`、`retreiver`（stem 與輸入相同），不含 stopword，同一個 stem 只出現一次，長度 ≤ 5，不含輸入本身
-- [ ] 排序：測試內自己寫 OSA，重算 `(OSA, -原字 df, 原字)`，確認去重前的順序正確
-- [ ] 觸發條件（原字 df，測試時重新讀出）：
+- [x] `s = suggest('retreival', reader)`：`s[0] == 'retrieval'`（預先量到是第一名），而且 `'retrieved' not in s`、`'retrieve' not in s`。同一個 stem `retriev` 只出現一次，代表的是 OSA 最小的 `retrieval`，不是 df 較高的 `retrieved`（140）、`retrieve`（138）
+- [x] 去重規則：在去重前的排序結果中，每個 stem 第一次出現的原字，必須正好是 `s` 中代表該 stem 的原字。測試內自己寫 OSA 重算排序
+- [x] 結果不含 `retreived`、`retreives`、`retreiver`（stem 與輸入相同），不含 stopword，同一個 stem 只出現一次，長度 ≤ 5，不含輸入本身
+- [x] 排序：測試內自己寫 OSA，重算 `(OSA, -原字 df, 原字)`，確認去重前的順序正確
+- [x] 觸發條件（原字 df，測試時重新讀出）：
   - `retreival`（1）→ `retrieval`（81），觸發
   - `linux`（997）→ `linus`（28），不觸發
   - `kernal`（2）→ `kernel`，觸發
   - `computr`（0）→ `computer`，觸發
-- [ ] `load_surface(reader).stem('retrieval') == 'retriev'`，而且 `'retriev' in reader`
+- [x] `load_surface(reader).stem('retrieval') == 'retriev'`，而且 `'retriev' in reader`
 
 **9. Wildcard**
-- [ ] lexer：`*mon`、`co*tion`、`*tion*`、`a*b*c`、`/5*` 都是 `WILDCARD`；`*`、`**`、`linux OR **` 拋 `ValueError`（位置分別是 0、0、9）
-- [ ] `parse('Co*TION', pre) == Wildcard('co*tion')`、`parse('co**tion', pre) == Wildcard('co*tion')`
-- [ ] **與暴力掃描一致**：對 `*mon`、`co*tion`、`*tion*`、`ab*ba`、`*x*`（沒有 bigram，走全掃的路徑），各做兩件事：
+- [x] lexer：`*mon`、`co*tion`、`*tion*`、`a*b*c`、`/5*` 都是 `WILDCARD`；`*`、`**`、`linux OR **` 拋 `ValueError`（位置分別是 0、0、9）
+- [x] `parse('Co*TION', pre) == Wildcard('co*tion')`、`parse('co**tion', pre) == Wildcard('co*tion')`
+- [x] **與暴力掃描一致**：對 `*mon`、`co*tion`、`*tion*`、`ab*ba`、`*x*`（沒有 bigram，走全掃的路徑），各做兩件事：
   - 用 `expand(..., limit=10**9)` 取得的 term 集合，要等於暴力做法的結果：在 `fnmatch.fnmatchcase(word, pattern)` 為 True 的原字中，取 stem 不是空字串的部分去重
   - 預設 `limit=100` 時，結果的順序要等於暴力結果依 `(-reader.df(s), s)` 排序後的前 100 個
 
   預先量到的 stem 數：276、528、7,482、3、22,129。前三個都超過 100，所以要警告 1 次，訊息含總數。測試用的 pattern 不能含 `?` 或 `[`，因為 `fnmatch` 會把它們當成萬用字元。
-- [ ] post-filter：`ab*ba` 對到的原字長度都 ≥ 4，例如 `aba` 不能出現。k-gram 篩出 91 個候選，最後只剩 3 個
-- [ ] `computers*` 的展開結果包含 `T(['comput'])`，而且是第一個；共 6 個，沒有警告
-- [ ] `computing*` → `T(['comput'])`，沒有警告；`linux OR computing*` → `Or([T(['linux']), T(['comput'])])`
-- [ ] `e-mail*` → `None`，警告 1 次；`linux OR e-mail*` → `T(['linux'])`。這兩項取代舊的 `computing*` 測試
-- [ ] 樹中沒有 Wildcard／Soundex 時，`expand` 不呼叫 `load_surface`（用 spy 或 monkeypatch 檢查）
+- [x] post-filter：`ab*ba` 對到的原字長度都 ≥ 4，例如 `aba` 不能出現。k-gram 篩出 91 個候選，最後只剩 3 個
+- [x] `computers*` 的展開結果包含 `T(['comput'])`，而且是第一個；共 6 個，沒有警告
+- [x] `computing*` → `T(['comput'])`，沒有警告；`linux OR computing*` → `Or([T(['linux']), T(['comput'])])`
+- [x] `e-mail*` → `None`，警告 1 次；`linux OR e-mail*` → `T(['linux'])`。這兩項取代舊的 `computing*` 測試
+- [x] 樹中沒有 Wildcard／Soundex 時，`expand` 不呼叫 `load_surface`（用 spy 或 monkeypatch 檢查）
 
 **10. SOUNDEX**
-- [ ] `parse('SOUNDEX(Robert)', pre) == Soundex('robert')`；`parse('linux SOUNDEX(robert)', pre) == And([T(['linux']), Soundex('robert')])`
-- [ ] `SOUNDEX (robert)`、`soundex(robert)` → `And([T(['soundex']), T(['robert'])])`；`SOUNDEX robert` → `T(['soundex', 'robert'])`
-- [ ] 以下輸入拋 `ValueError`，位置如括號所示：`SOUNDEX(robert`（7）、`SOUNDEX()`（0）、`SOUNDEX(robert smith)`（0）、`SOUNDEX(rob*)`（0）、`SOUNDEX("robert")`（0）、`SOUNDEX(123)`（0）
-- [ ] `query_terms(Soundex('robert'))` 拋 `ValueError`
-- [ ] `expand(SOUNDEX(robert), limit=10**9)` 的 term 集合，要等於暴力做法的結果：在原字詞彙中，取 `isascii() and isalpha()` 且 `soundex(w) == 'R163'` 的原字，stem 不是空字串的部分去重（預先量到 214 個）。集合必須同時包含 `robert` 與 `rupert`
-- [ ] 預設 `limit` 時共 100 個，警告 1 次，訊息含 `214`；`robert`、`rupert` 都在結果中
-- [ ] 再測兩組同碼的例子：`smith`／`smyth`（S530）、`stephen`／`steven`（S315）。兩個原字都要存在於原字詞彙，而且彼此的 stem 都出現在對方的 `expand(..., limit=10**9)` 結果中
-- [ ] `SOUNDEX(robert) /5 kernel` → `And([Soundex('robert'), T(['kernel'])])`，警告 1 次（NEAR 左側是空的）
+- [x] `parse('SOUNDEX(Robert)', pre) == Soundex('robert')`；`parse('linux SOUNDEX(robert)', pre) == And([T(['linux']), Soundex('robert')])`
+- [x] `SOUNDEX (robert)`、`soundex(robert)` → `And([T(['soundex']), T(['robert'])])`；`SOUNDEX robert` → `T(['soundex', 'robert'])`
+- [x] 以下輸入拋 `ValueError`，位置如括號所示：`SOUNDEX(robert`（7）、`SOUNDEX()`（0）、`SOUNDEX(robert smith)`（0）、`SOUNDEX(rob*)`（0）、`SOUNDEX("robert")`（0）、`SOUNDEX(123)`（0）
+- [x] `query_terms(Soundex('robert'))` 拋 `ValueError`
+- [x] `expand(SOUNDEX(robert), limit=10**9)` 的 term 集合，要等於暴力做法的結果：在原字詞彙中，取 `isascii() and isalpha()` 且 `soundex(w) == 'R163'` 的原字，stem 不是空字串的部分去重（預先量到 214 個）。集合必須同時包含 `robert` 與 `rupert`
+- [x] 預設 `limit` 時共 100 個，警告 1 次，訊息含 `214`；`robert`、`rupert` 都在結果中
+- [x] 再測兩組同碼的例子：`smith`／`smyth`（S530）、`stephen`／`steven`（S315）。兩個原字都要存在於原字詞彙，而且彼此的 stem 都出現在對方的 `expand(..., limit=10**9)` 結果中
+- [x] `SOUNDEX(robert) /5 kernel` → `And([Soundex('robert'), T(['kernel'])])`，警告 1 次（NEAR 左側是空的）
 
 **回歸**
-- [ ] `t4.test.py` **48/48，不改任何一行**。理由：
+- [x] `t4.test.py` **48/48，不改任何一行**。理由：
   - 第 200 行的 `query_terms(Wildcard("comput"))` 是用位置參數建立節點，欄位改名不影響；它只檢查會不會拋 `ValueError`
   - 第 233 行 `_lex` 的 `win*` 仍是 `WILDCARD`
   - 表中沒有任何 query 含有 `*` 或 `SOUNDEX`
-- [ ] `t1.test.py`：原有的 15 項加上「`process` 重構」一節全部通過（§6.8.1 第 3 步）。golden 值的那幾項在重構前就要先通過
-- [ ] `t1_bonus`、`t2`、`t3`（含 bonus）不改測試檔，照樣全過
-- [ ] `t4_bonus.test.py` 中既有的測試全部通過，需要修改的地方逐一列在下表：
+- [x] `t1.test.py`：原有的 15 項加上「`process` 重構」一節全部通過（§6.8.1 第 3 步）。golden 值的那幾項在重構前就要先通過
+- [x] `t1_bonus`、`t2`、`t3`（含 bonus）不改測試檔，照樣全過
+- [x] `t4_bonus.test.py` 中既有的測試全部通過，需要修改的地方逐一列在下表：
 
 | 位置（目前的行號） | 測試 | 改法 | 原因 |
 | --- | --- | --- | --- |
@@ -653,7 +653,7 @@ T4b 完成後的追加項目。它取代 §6.4 的展開方式、§6.5 的候選
 
 G6 另外在第 10 節加一項：`SOUNDEX()` 與 `suggest_soundex` 用的是**同一個**對照表物件（兩次呼叫 `load_surface(reader).soundex_groups()` 會回傳同一個物件，用 `is` 檢查），而且 `spelling` 模組中不再有 `_soundex_table`／`_soundex_cache`。
 
-- [ ] **計時**（寫進 §9.1，不設門檻）：
+- [x] **計時**（寫進 §9.1，不設門檻）：
   - `load_surface`（讀 tsv、核對 sha256）的時間與記憶體
   - 原字 k-gram index 的建置
   - `suggest`（原字）
@@ -695,7 +695,7 @@ T4 範圍內沒有待決問題；純 NOT 的輸出方式交由 T6／T7 決定：
 ## 9. 實作紀錄
 
 ### 9.1 結果
-**核心（T4a）與加分（T4b）都已完成。** 核心改動 `HW2/src/parser.py` 並新增 `HW2/tests/t4.test.py`；加分改動 `parser.py`、`positional.py`、`spelling.py`，並新增 `HW2/tests/t4_bonus.test.py`。`writer.py`、`tokenizer.py`、`boolean.py`、`rank.py`、`HW1/`、`HW2/index/` 都沒有動；接口簽名與 AST dataclass 沒有改。
+**核心（T4a）、加分（T4b）與 T4c（§6.8）都已完成。** T4c 的紀錄在 §9.1.3（資料層）與 §9.1.4（拼字、wildcard、SOUNDEX）。以下是 T4a／T4b 當時的紀錄：核心改動 `HW2/src/parser.py` 並新增 `HW2/tests/t4.test.py`；加分改動 `parser.py`、`positional.py`、`spelling.py`，並新增 `HW2/tests/t4_bonus.test.py`。`writer.py`、`tokenizer.py`、`boolean.py`、`rank.py`、`HW1/`、`HW2/index/` 都沒有動；接口簽名與 AST dataclass 沒有改。
 
 #### 9.1.1 核心（T4a）
 
@@ -761,7 +761,7 @@ T4 範圍內沒有待決問題；純 NOT 的輸出方式交由 T6／T7 決定：
 
 **拼字建議實際結果**：`suggest('retreival')` = `retreiv`(11)、`retrial`(2)、`retriev`(409)、`retreat`(251)、`pretrial`(11)，前三名與 §6.5 預先量測相同；`suggest('retreiv')` 第一名 `retriev`；`suggest('linux')` 第一名 `linu`(28)；`suggest('kernal')` 第一名 `kernel`(279)。`suggest_soundex('retreiv')` 前 5 個是 `retriev`、`rutherford`、`retrofit`、`retroberri`、`retribut`（都是 R361）。
 
-#### 9.1.3 T4c 資料層（§6.8.1；拼字、wildcard、SOUNDEX 尚未改）
+#### 9.1.3 T4c 資料層（§6.8.1；拼字、wildcard、SOUNDEX 見 §9.1.4）
 **範圍**：只做 §6.8.1 的資料層。改動 `HW2/src/tokenizer.py`（抽出 `normalize_token`）與 `HW2/tests/t1.test.py`（新增「`process` 重構」一節，原有 15 項不改）；新增 `HW2/src/build_surface_vocab.py`、`HW2/src/surface.py`、`HW2/tests/t4_surface.test.py`；`HW2/index/` 只新增 `surface_vocab.tsv`、`surface_vocab.meta.json`。`parser.py`、`spelling.py`、`t4_bonus.test.py` 都沒有動，§6.8.2–§6.8.5 尚未實作。建置前後用 `sha256sum` 比對過：`HW2/index` 的 11 個既有檔案與 `HW1/output` 的 6 個檔案都沒有改變。`HW2/index/` 整個在 `.gitignore` 中，所以 `surface_vocab.*` 不會出現在 git 中（依 G8，繳交時另外放進 zip）。
 
 **`process` 重構的測試狀態**（`t1.test.py`）：
@@ -805,6 +805,82 @@ meta 的 `origin`：`HW1/output/lexicon.tsv` 15,550,484 bytes、sha256 `fbcb18ac
 - `tokenizer.py`：`normalize_token` 第 94–104 行、`process` 第 106–112 行（原本 `:94-106`）、`from_config` 第 113–130 行（往下移 6 行）
 - `surface.py`：`surface_stem` 第 34 行、`SurfaceVocab` 第 42 行（`df` 第 61 行、`stem` 第 66 行、`stem_of_any` 第 71 行）、`load_surface` 第 77 行
 - `build_surface_vocab.py`：`check_sources` 第 64 行、`consistency` 第 88 行、`build_surface_vocab` 第 124 行
+
+（`surface.py` 的行號在 §9.1.4 之後已改變，以 §9.1.4 為準。）
+
+#### 9.1.4 T4c 拼字、wildcard、SOUNDEX（§6.8.2–§6.8.5）
+**範圍**：改動 `HW2/src/parser.py`、`spelling.py`、`surface.py`，以及 `HW2/tests/t4_bonus.test.py`（依 §6.8.8 的修改表逐條改，再新增第 9–11 節）、`t4_surface.test.py`（新增第 6、7 節：k-gram index 與 Soundex 分組的資料結構）。`positional.py` 不必改。`writer.py`、`tokenizer.py`、`build_*` 腳本、`HW2/index/` 都沒有動。實作順序是 wildcard → SOUNDEX → 拼字，每完成一項都跑一次 `t4_bonus` 與 `t4_surface`。
+
+**測試狀態**：
+| 階段 | `t4_bonus.test.py` | `t4_surface.test.py` |
+| --- | --- | --- |
+| 改完測試、程式還沒改 | 100/162（62 項 FAIL，全部是 §6.8 新增或改變的行為） | 34/40（新增的 6 項 FAIL：`bigrams`、`pattern_bigrams`、`kgram`、`spelling` 殘留、`soundex_groups` ×2） |
+| wildcard 之後 | 124/162 | 37/40 |
+| SOUNDEX（含 `suggest_soundex`）之後 | 149/162 | 39/40 |
+| 拼字（`suggest`、`did_you_mean`、`query_words`）之後 | **162/162** | **40/40** |
+
+改測試前 100 項仍通過的原因：§6.8.8 的修改表中「數值不變」的項目（`a*`、`comput*` 的順序與巢狀、`_expand_copy`、`position_match` 全部），以及 `SOUNDEX(robert` 這類舊 parser 剛好也拋 `ValueError` 的輸入。
+
+**回歸**（全部完成後，同一次執行）：
+| 測試 | 結果 |
+| --- | --- |
+| `t1` ／ `t1_bonus` | **27/27** ／ 11/11 |
+| `t2` ／ `t2_bonus` | 19/19 ／ 37/37 |
+| `t3` ／ `t3_bonus` | 17/17 ／ 25/25 |
+| `t4` | **48/48**（測試檔沒改） |
+| `t4_bonus` ／ `t4_surface` | **162/162** ／ **40/40** |
+
+`t4_bonus.test.py` 的 162 項：第 1 節 45、第 2 節 10、第 3 節（expand）10（`computing*` 拆成 `computing*` 與 `e-mail*` 兩項）、第 4 節（`position_match`）19、第 5 節（拼字，含 §6.8.8 第 8 節）15、第 6 節（Soundex）10、第 9 節（wildcard）22、第 10 節（SOUNDEX）30、第 11 節（新 process 的 `did_you_mean`）1。§6.8.8 第 7 節在 `t4_surface.test.py`（§9.2 T4c 資料層第 1 點）。
+
+**與暴力做法對照的結果**（預期值都由測試內獨立的做法算出：直接讀 tsv、`fnmatchcase` 全掃、自己寫 Jaccard 與 OSA、自己分組）：
+| 項目 | 結果 |
+| --- | --- |
+| wildcard 去重後的 stem 數 | `*mon` 276、`co*tion` 528、`*tion*` 7,482、`ab*ba` 3、`*x*` 22,129，集合與 `limit=100` 的順序都與暴力相同，和 §6.8.4 的預先量測一致 |
+| `ab*ba` 的 post-filter | k-gram 候選 91 個，regex 後剩 3 個（`abba`、`ababa`、`abeba`）；`aba` 在候選中但被刷掉 |
+| `computers*` ／ `computing*` ／ `e-mail*` | 6 個（第一個 `comput`）／ `T(['comput'])` ／ `None`（警告 1 次） |
+| `SOUNDEX(robert)` | 214 個 stem，前 5 個 `report`、`refer`、`robert`、`repair`、`reproduc`；`robert` 第 3、`rupert` 第 20；警告 `SOUNDEX(robert) matched 214 terms; using the top 100 by df` |
+| `smith`／`smyth`、`stephen`／`steven` | 互相包含對方的 stem（S530 396 個 stem、S315 185 個 stem） |
+| Soundex 分組 | 6,361 種碼，最大一組 1,240 個原字，與暴力分組相同 |
+| k-gram index | 35,235 種 bigram，共 6,311,830 個原字 id；7 個 bigram 的 posting 與暴力相同 |
+| `suggest` | `retreival`、`kernal`、`computr` 的完整結果（`limit=10**9`）與前 5 名都與暴力相同 |
+
+**拼字建議實際結果**（原字，括號內是原字 df）：
+| 輸入 | `suggest` 前 5 名 | `did_you_mean` |
+| --- | --- | --- |
+| `retreival`（1） | `retrieval`（81）、`retrial`（2）、`retreat`（178）、`revival`（88）、`pretrial`（11） | `['retrieval', 'retrial', 'retreat']` |
+| `retrieval`（81） | `retreival`、`retrial`、`retrievr`、`medieval`、`retreat` | `[]` |
+| `linux`（997） | `linus`（28）、`linqx`、`linuq`、`lieux`、`linx` | `[]` |
+| `kernal`（2） | `kernel`（266）、`kernan`、`bernal`、`vernal`、`kenal` | 觸發 |
+| `computr`（0） | `computer`（5,223）、`computo`、`computar`、`computor`、`compete` | 觸發 |
+| `recieve`（40）、`goverment`（53）、`informaton`（2） | 第一名 `receive`（4,456）、`government`（2,605）、`information`（11,168） | 都觸發 |
+| `linus`（28） | `links`（9,251）、`lines`、`linux`、`minus`、`sinus` | 觸發（正確的人名也觸發，§10.4） |
+| `teh`（292） | `ten`、`tech`、`th`、`te`、`tel` | `[]`（`the` 是 stopword，被排除） |
+
+`stem` 為 `retriev` 的原字在去重前的順序是 `retrieval`（OSA 1）、`retrievals`（2）、`retrievable`（3），所以保留 `retrieval`；df 較高的 `retrieved`（140）距離更大，不會出現。`suggest_soundex('retreival')` = `retrieved`、`rutherford`、`retroberry`、`retribution`、`retrouver`（都是 R361）；`suggest_soundex('robert')` = `report`、`referred`、`reproduced`、`reproduction`、`roberto`，與 §6.8.5 的預先量測相同。
+
+**計時**：本機 WSL2，回歸時那一次 `t4_bonus.test.py` 的執行，暖身一次後 5 次中位數（標明 s 的是單次）。
+| 項目 | 時間 | 前提／對照 |
+| --- | --- | --- |
+| **`did_you_mean` 第一次呼叫（總成本）** | **1.59 s**（3 個新 process 的中位數：1.65、1.59、1.59 s） | 新 process，import 之後、lexicon 已載入（讀 lexicon 另需 0.39 s，不算在內）。包含 `load_surface` + 建原字 k-gram + 查詢；同一個 process 的第二次呼叫 27 ms。子 process 的峰值 RSS 503 MB（含 spaCy、lexicon、原字詞彙、k-gram） |
+| 　拆開量（新 process，3 次中位數） | `load_surface` 0.54 s、建 k-gram 1.06 s、查詢 33 ms | 三段加起來與上一列一致 |
+| 原字 k-gram index 建置 | 0.95 s（不開 tracemalloc）；4.01 s（開 tracemalloc） | 644,523 個原字；預先量測 1.05 s |
+| 原字 k-gram index 記憶體 | 建置後仍占用 32.1 MiB，峰值 33.0 MiB | `tracemalloc`，不含原字詞彙本身（`load_surface` 75.9 MiB，§9.1.3）；與預先量測相同 |
+| `suggest`（k-gram 已建好） | `retreival` 24.8 ms、`linux` 17.1 ms、`a` 9.0 ms、`computer` 45.2 ms | 主要是對 Jaccard 篩出的候選算 OSA；T4b 的 stem 版是 9.3–31.6 ms |
+| 原字 Soundex 對照表建置（含第一次 `suggest_soundex`） | 0.45 s | 預先量測 0.44 s；T4b 的 stem 版 0.46 s |
+| `suggest_soundex('retreival')`（快取後） | 0.002 ms | 查表、跳過同 stem |
+| `expand(SOUNDEX(robert))` | 0.12 ms | 268 個原字 → 214 個 stem → 取前 100 |
+| `expand(*mon)` ／ `expand(co*tion)` ／ `expand(*tion*)` | 2.3 ms ／ 4.6 ms ／ 12.8 ms | k-gram 交集 + regex post-filter；預先量測 `co*tion` 9.9 ms、`*tion*` 17.3 ms |
+| `expand(*x*)`（沒有 bigram，全掃） | 81.3 ms | regex 掃過 644,523 個原字；預先量測 78 ms |
+| `expand(comput*)` ／ `expand(a*)` | 1.53 ms ／ 30.0 ms | T4b 的 `prefix_terms` 版是 0.027 ms ／ 10–11 ms。變慢的原因：要對 `$c`、`co` 這類很長的 posting 取交集，`a*` 要對 `$a` 的全部原字跑 regex、轉 stem、對 31,236 個 stem 排序 |
+| `load_surface`（`t4_surface`） | 0.52 s；75.9 MiB | 與 §9.1.3 相同 |
+| `position_match` 各項 | `"open source"` 12.2 ms、`linux /5 kernel` 1.7 ms、`"lord of the rings"` 2.7 ms、`e-mail /5 server` 25.6 ms | 沒有改動，與 §9.1.2 相同 |
+
+`build_surface_vocab.py` 這次沒有重建（§9.1.3 的 4.41 s，其中 `normalize_token` 2.78 s；`t4_surface` 單獨重量 `normalize_token` × 644,523 是 2.68 s）。
+
+**實作位置**：
+- `parser.py`：`Wildcard` 第 45 行、`Soundex` 第 50 行、`Node` 第 69 行、`_lex` 第 85 行、`_UNARY_START` 第 120 行、`parse_primary` 第 169 行、`parse_soundex` 第 203 行、`_prune` 第 261 行、`_needs_expand` 第 321 行、`parse` 第 332 行、`expand` 第 355 行（`_expand_node` 第 376 行、`_top_terms` 第 393 行）、`query_words` 第 415 行、`query_terms` 第 447 行
+- `surface.py`：`bigrams` 第 45 行、`pattern_bigrams` 第 55 行、`pattern_regex` 第 66 行、`SurfaceVocab` 第 71 行（`kgram` 第 108 行、`wildcard_candidates` 第 121 行、`match_wildcard` 第 144 行、`soundex_groups` 第 150 行）、`load_surface` 第 167 行
+- `spelling.py`：`_osa` 第 21 行、`suggest` 第 39 行、`did_you_mean` 第 82 行、`soundex` 第 106 行、`suggest_soundex` 第 131 行。`_bigrams`、`_kgram_index`、`_kgram_cache`、`_soundex_table`、`_soundex_cache` 都已刪除
 
 ### 9.2 與計畫的差異
 1. **lexer 一開始就用 T4b 的 regex**：§4.1 原本寫核心用 `\S+`、T4b 再換 regex。實作直接用 §6.1 的 `"[^"]*"?|[()]|[^\s()"]+`，並分出全部 9 種 kind：`WORD`、`AND`、`OR`、`NOT`、`(`、`)`、`PHRASE`、`WILDCARD`（結尾是 `*`）、`NEAR`（整個 token 符合 `/\d+`）。T4b 不必改 `_lex`。§4.2 表中的 query 結果不受影響。
@@ -851,6 +927,21 @@ meta 的 `origin`：`HW1/output/lexicon.tsv` 15,550,484 bytes、sha256 `fbcb18ac
 8. **`df`、`stem` 只做精確比對**，不對輸入做 casefold；`stem_of_any` 對不在詞彙中的字呼叫 `normalize_token`，它本身會做 casefold。
 9. **重構前的狀態**：§6.8.1 第 3 步預期重構前只有「呼叫計數」會失敗。實際上「組合關係」也會失敗，因為它也要呼叫 `normalize_token`（見 §9.1.3 的表）。golden 值在重構前後都通過。
 10. **建置的峰值 RSS 是 351.7 MB**：計畫沒有估這個數字。主要來自 spaCy、HW2 lexicon 的 dict，以及 644,523 個原字的 list。只有建置時需要；查詢時的成本見 §9.1.3 的 `load_surface`（75.9 MiB）。
+
+**T4c 拼字、wildcard、SOUNDEX 與計畫的差異**（§6.8.2–§6.8.5；以上是資料層的紀錄）：
+1. **k-gram 與 Soundex 分組快取在 `SurfaceVocab` 物件上**（`_kgram`、`_soundex` 屬性），不另外用 `WeakKeyDictionary`。`SurfaceVocab` 本身已依 reader 快取（`load_surface`），所以壽命相同。§6.8.8 修改表中「清除 `surface.py` 的快取」在測試中寫成 `sv._kgram = None`／`sv._soundex = None`：只重建這一份結構，不重讀 tsv。
+2. **`surface.py` 多了幾個公開名稱**：`pattern_bigrams(pattern)`（§6.8.4 第 1 步）、`pattern_regex(pattern)`（post-filter 的 regex），以及 `SurfaceVocab.wildcard_candidates(pattern)`（只做 k-gram 篩選）與 `match_wildcard(pattern)`（篩選 + post-filter）。拆成兩個方法，是為了讓測試能直接檢查「`ab*ba` 有 91 個候選，post-filter 後剩 3 個」。`soundex_groups()` 存的是原字 id（不是字串），每組已依 `(-原字 df, 原字)` 排序，呼叫端用 id 直接取 `words`、`stems`、`dfs`。
+3. **k-gram 交集**：從最短的 posting 建 `set`，再對其他 posting 做 `intersection_update`，變空就回傳；pattern 中任何一個 bigram 不在 index 中時直接回傳空 list。沒有 bigram 時回傳 `range(len(words))`（全掃）。
+4. **`SOUNDEX()` 參數的 ASCII 字母檢查直接呼叫 `spelling.soundex(word)`**（回傳空字串就拋錯），不另外寫 regex。這樣 parse 與 expand 用同一個函式判斷，不會出現 parse 接受、expand 卻算不出碼的情況。因此 `parser.py` 在模組層級 import `spelling.soundex` 與 `surface`；import 關係是 `parser → spelling → surface → tokenizer`，`surface.soundex_groups()` 在函式內才 import `spelling`，沒有循環。
+5. **`SOUNDEX(` 的錯誤分類**（計畫只列了 `SOUNDEX(robert`）：`(` 後面沒有 token，或是只有一個 `WORD` 就結束（`SOUNDEX(`、`SOUNDEX(robert`），拋 `unmatched '(' at position N`（N 是 `(` 的位置）；其餘不是「恰好一個 `WORD` 接 `)`」的情況，都拋 `SOUNDEX() needs exactly one word at position N`（N 是 `SOUNDEX` 的位置）。另外測了 `SOUNDEX(SOUNDEX(x))`、`SOUNDEX(NOT x)`、`linux SOUNDEX(李)`（位置 6）。
+6. **expand 的警告**：訊息是 `wildcard {pattern} matched N terms; using the top 100 by df`、`wildcard {pattern} matched no term in the dictionary; removed from query`；Soundex 把開頭換成 `SOUNDEX({word})`。兩者由同一個 helper `_top_terms` 發出，`stacklevel=4`：Wildcard／Soundex 是根節點時指到 `expand` 的呼叫端（T4b 的 `stacklevel=4` 是設在 `_expand_node` 裡，會多指一層）。`limit < 1` 時與 T4b 相同：超過上限的警告照發，節點移除。
+7. **`expand` 經由模組屬性呼叫 `surface.load_surface`**，不是 `from surface import load_surface`，所以測試可以用 spy 換掉它，確認樹中沒有 Wildcard／Soundex 時一次都沒有呼叫（§6.8.8 第 9 節最後一項）。
+8. **`suggest`、`did_you_mean`、`suggest_soundex` 會先對輸入做 casefold**：計畫寫輸入已經是 casefold 過的原字，這裡只是防呆，不影響 `query_words` 的輸出。`suggest` 的輸入 stem 用 `stem_of_any` 計算，所以輸入是 stopword 時，stem 是空字串，stopword 本來就會被排除。
+9. **`query_words` 的細節**：`SOUNDEX` token 之後連同 `(` 與參數一起略過（共 3 個 token），`)` 照一般規則略過；沒有結尾引號的 `PHRASE` 只去掉開頭的引號；stopword 用 `pre.normalize_token(tok) is None` 判斷（與 `process` 同一段程式）；去重以 casefold 後的字為準（`linux linux LINUX` → `['linux']`）。
+10. **測試的位置與編號**：k-gram index 與 Soundex 分組的資料結構測試放在 `t4_surface.test.py` 新的第 6、7 節。`t4_bonus.test.py` 的 §6.8.8 第 8 節（拼字）與舊的第 5 節合併，因為修改表本來就要改寫第 5 節的大部分項目；第 9、10 節照計畫的編號新增，另外加第 11 節，在全新的 process 中量 `did_you_mean` 第一次呼叫的成本（用 `subprocess` 執行，3 次）。修改表的 `_retreiv` 已刪除，改由第 5 節的 `stem('retrieval') == 'retriev'` 取代。
+11. **測試比計畫多的項目**：`suggest` 與暴力的完整比對（全掃 644,523 個原字算 Jaccard、自己寫 OSA，對 `retreival`、`kernal`、`computr` 比完整結果與前 5 名）；`did_you_mean(show=1)`；`query_words` 5 項；`suggest_soundex` 與暴力的前 20 名；`SOUNDEX` 的 13 種 AST（含 `SOUNDEXES(x)`、`SOUNDEX(O'Brien)`、`NOT SOUNDEX(robert) linux`）與 `_lex`；`t4_surface` 的 `bigrams`、`pattern_bigrams`、`kgram` 結構、Soundex 分組結構。
+12. **`expand(comput*)`、`expand(a*)` 比 T4b 慢**（0.027 → 1.5 ms、10 → 30 ms，§9.1.4）：計畫沒有估這兩項。`comput*` 要對 `$c`、`co`、`om` 這類很長的 posting 取交集；`a*` 的候選是 `$a` 的全部原字，要一一跑 regex、轉成 stem 再排序。仍在幾十 ms 以內，所以沒有另外為「只有結尾 `*`」的 pattern 寫 bisect 的快捷路徑。
+13. **`positional.py` 不必改**：Phrase／Near 的比對沒有變，`position_match` 的計時也與 §9.1.2 相同。
 
 ### 9.3 需要回寫 00-overview.md
 之後所有要回寫總規劃的項目一律記在這裡，不只在對話中列出。回寫完成後打勾，並註明回寫的位置。以下是本次一致性檢查（§4.4）找到的項目：
@@ -944,13 +1035,20 @@ T4b 實作後新增的項目，已與 §6.8 合併後一起回寫。以下行號
 
   第 404 行「待確認：zip 是否附 index」不變，`surface_vocab.*` 已另外決定附上
 
-**§6.8 實作後回寫**（現在先不做）：
-- [ ] 總規劃中 T4c 的「計畫中」字樣與預先量測的數字（第 30、80–81、147–157、339、340 行等）：實作後改成正式的量測結果，並拿掉「計畫中」
-- [ ] `done.T1.md` 的實作紀錄（§9）新增一點：「T4c 在 `tokenizer.py` 抽出 `Preprocessor.normalize_token`，`process` 改成呼叫它，行為不變（`t1.test.py` 的 golden 值與呼叫計數證明）；`indexer.py` 不必改，index 不必重建」
-- [ ] `done.T1.md` 與本計畫 §2、§3 中 `Preprocessor.process` 的行號（`tokenizer.py:94-106`）：重構後改成實際的行號
-  - **資料層實作後的實際行號**（尚未回寫到上述位置）：`Preprocessor.normalize_token` 是 `tokenizer.py:94-104`，`Preprocessor.process` 是 `tokenizer.py:106-112`，`from_config` 往下移 6 行，變成 `tokenizer.py:113-130`（原本 `:107-124`）
-  - 要改的地方：本計畫第 17 行（§2 表格）、第 316 行（§6.8.1 第 3 步的「目前 `tokenizer.py:94-106`」，這一句描述的是重構前的狀態，可以保留並註明是舊行號）、第 547 行（§6.8.6）；`done.T1.md` 第 56 行（`tokenizer.py:94-106` 與 stub 位置 `tokenizer.py:107-114`）
-- [ ] 總規劃與 `done.T1.md` 補上資料層的量測：建置 4.41 s（`normalize_token` 2.78 s）、`surface_vocab.tsv` 14,191,438 bytes、`load_surface` 0.54 s／75.9 MiB、一致性例外全部是 0（§9.1.3）。總規劃 F6 的 `load_surface`、CLI（第 147–157 行）可以先拿掉「計畫中」；wildcard、拼字、SOUNDEX 的部分要等 §6.8.2–§6.8.5 完成
+**§6.8 實作後回寫**（§6.8.2–§6.8.5 完成後已回寫；行號是回寫後的位置）：
+- [x] 總規劃中 T4c 的「計畫中」字樣與預先量測的數字：已拿掉「計畫中」，改成實測數字（§9.1.3、§9.1.4）。**已回寫**（`00-overview.md`）：
+  - 第 30 行（檔案配置：T4c 已完成）、第 35 行（`normalize_token` 重構已完成，`t1.test.py` 27/27）、第 81 行（`normalize_token` 的接口註解）
+  - 第 147、152 行（接口區塊的標題）、第 156 行（`load_surface` 0.54 s、75.9 MiB）、第 158–159 行（新增 `kgram`、`match_wildcard`、`soundex_groups`：0.95 s、32 MiB、0.45 s）、第 161 行（CLI：建置 4.41 s、`normalize_token` 2.78 s、tsv 14,191,438 bytes、一致性例外 0）
+  - 第 244 行（T4「只有一個 parser」的 T4c：已完成）
+  - 第 326 行（T7「拼字建議」：第一次呼叫的成本改成實測 1.6 s，`load_surface` 0.54 s + k-gram 1.06 s + 查詢約 30 ms；並補一句「**`did_you_mean` 首次呼叫有約 1.6 s 成本，建議只在結果很少時呼叫**」）
+  - 第 343 行（加分表第 6 項：`*x*` 全掃實測 81 ms，一般 pattern 2–30 ms）、第 344 行（第 7 項：k-gram 實測 0.95 s、32.1 MiB，`did_you_mean` 第一次約 1.6 s）
+  - 第 397 行（已知限制「拼字建議」：補上第一次呼叫約 1.6 s）
+  - 已用 `grep` 確認總規劃中不再有「計畫中」「預先量」「待實作」「待量」字樣
+- [x] `done.T1.md` 的實作紀錄（§9）新增一點：「T4c 在 `tokenizer.py` 抽出 `Preprocessor.normalize_token`，`process` 改成呼叫它，行為不變（`t1.test.py` 的 golden 值與呼叫計數證明）；`indexer.py` 不必改，index 不必重建」。**已回寫**：`done.T1.md` §9.1 第 121–124 行（另含重構前後的測試狀態 19/27 → 27/27）；§3 接口（第 30 行）補上 `normalize_token`
+- [x] `done.T1.md` 與本計畫 §2、§3 中 `Preprocessor.process` 的行號（`tokenizer.py:94-106`）：重構後改成實際的行號。實際行號：`Preprocessor.normalize_token` 是 `tokenizer.py:94-104`，`Preprocessor.process` 是 `tokenizer.py:106-112`，`from_config` 往下移 6 行，變成 `tokenizer.py:113-130`（原本 `:107-124`）。**已回寫**：
+  - 本計畫第 17–18 行（§2 表格的 `process`、`from_config`）、第 316 行（§6.8.1 第 3 步，註明是重構前的舊行號）、第 547 行（§6.8.6）
+  - `done.T1.md` 第 48 行（§4 `from_config`）、第 57 行（§4 與總規劃的差異）、第 132 行（§9.2 行號位移）。T1 當時的舊行號保留，旁邊註明重構後的行號
+- [x] 總規劃與 `done.T1.md` 補上資料層的量測：建置 4.41 s（`normalize_token` 2.78 s）、`surface_vocab.tsv` 14,191,438 bytes、`load_surface` 0.54 s／75.9 MiB、一致性例外全部是 0（§9.1.3）。**已回寫**：`00-overview.md` 第 156、161 行；`done.T1.md` 第 124 行
 
 `done.T1.md` 的敘述（§6.8.6 列的前三項）：
 - [x] §6.1 第 74 行的評分面向。**已改**：`done.T1.md` 第 74 行
@@ -958,44 +1056,52 @@ T4b 實作後新增的項目，已與 §6.8 合併後一起回寫。以下行號
 - [x] §10.4 第 4 點。**已改**：`done.T1.md` 第 169 行
 
 ## 10. 一頁文件素材
-只根據第 9 節實作紀錄與本文件已決定的事項整理，沒有新增未量測的數字。計時都在本機 WSL2 上量測，取暖身一次後 5 次的中位數，不設門檻。
+只根據第 9 節實作紀錄與本文件已決定的事項整理，沒有新增未量測的數字。計時都在本機 WSL2 上量測，取暖身一次後 5 次的中位數，不設門檻；「第一次呼叫」是在全新的 process 中量的單次時間（3 個 process 的中位數）。
 
 ### 10.1 主要特色
-1. **一個遞迴下降 parser 支援全部語法**：單一關鍵字、自由文字、`AND`／`OR`／`NOT`、括號、`"phrase"`、`a /k b`、`prefix*`，優先序 NOT > AND > OR，相鄰的運算元是隱含 AND（`linux NOT windows`）。語法錯誤（引號或括號沒有配對、單獨的 `*`、`/0`）拋 `ValueError` 並指出字元位置；只有 stopword 或少了運算元的地方會被移除並警告，不會讓整個 query 失敗。
+1. **一個遞迴下降 parser 支援全部語法**：單一關鍵字、自由文字、`AND`／`OR`／`NOT`、括號、`"phrase"`、`a /k b`、任意位置的 `*`（`co*tion`、`*mon`）、`SOUNDEX(robert)`，優先序 NOT > AND > OR，相鄰的運算元是隱含 AND（`linux NOT windows`）。語法錯誤（引號或括號沒有配對、只有 `*` 的 wildcard、`/0`、`SOUNDEX()` 的參數不是恰好一個含 ASCII 字母的字）拋 `ValueError` 並指出字元位置；只有 stopword 或少了運算元的地方會被移除並警告，不會讓整個 query 失敗。
 2. **Phrase 與 proximity 共用「位置區間」**：phrase 的每次出現是一段區間（含 stopword 空洞，`"lord of the rings"` 是 `[p, p+3]`）；`a /k b` 的兩邊都可以是多詞 phrase（`e-mail /5 server`、`"open source" /3 "linux kernel"`），距離是兩段區間之間的間隔，不分先後，重疊不算。
-3. **結果以暴力掃描驗證**：10 個 phrase／proximity query 的結果與測試內獨立寫的暴力掃描完全相同，包括只靠反方向命中的文件（`e-mail /5 server` 的 doc 1400）。
-4. **Wildcard 依 df 展開**：`comput*` 展開成 64 個 term 的 OR；超過 100 個時只取 df 最高的 100 個並警告總數（`a*` 有 31,236 個）。
-5. **拼字建議（Did you mean）**：bigram Jaccard 篩候選、Damerau（OSA）距離排序，df 決定同分時的次序；另提供 Soundex 作為輔助。兩者都只提供建議。
+3. **原字詞彙層**：index 存的是 stem 過的詞（`retriev`），使用者看不懂也打不出來。另建一份 644,523 個原字的詞彙（原字 → df、stem），stem 由 Preprocessor 自己的 `normalize_token` 算出，與 index 的一致性例外是 0。wildcard、拼字建議、Soundex 都在原字上比對，比對到的原字再轉成 stem 去查 index。
+4. **Wildcard 支援任意位置的 `*`**：pattern 的固定片段（含邊界 `$`）在原字的 bigram k-gram index 上取交集篩選，再用 regex 做 post-filter（`ab*ba` 有 91 個候選，只有 3 個真的符合）；結果轉成 stem 去重，依 df 取前 100 個。`computing*` 對得到 `comput`，`*mon`、`co*tion`、`*tion*` 都可以用。
+5. **拼字建議顯示原字**：`retreival` → **`retrieval`**（不是 stem `retriev`）。bigram Jaccard 篩候選、Damerau（OSA）距離排序，依 stem 去重時保留距離最小的原字（所以不會顯示 df 較高、但距離較遠的 `retrieved`）；以原字 df 判斷是否觸發「Did you mean」。只提供建議，不自動替換。
+6. **SOUNDEX(x) 運算子**：把同一個 Soundex 碼的所有原字一起擴展進 query（`SOUNDEX(smith)` 同時找 `smith`、`smyth`）；`suggest_soundex` 與它共用同一份對照表。
+7. **結果以暴力做法驗證**：phrase／proximity 的 10 個 query 與測試內的暴力掃描完全相同；wildcard 的 5 個 pattern 與 `fnmatch` 全掃相同；拼字建議的完整排序與測試內自己寫的 Jaccard + OSA 相同；Soundex 分組與暴力分組相同。
 
 ### 10.2 量測數據
 
 | 數據 | 前提條件 | 比較對象 |
 | --- | --- | --- |
-| 測試：t4 48/48、t4_bonus 99/99；t1 15/15、t1_bonus 11/11、t2 19/19、t2_bonus 37/37、t3 17/17、t3_bonus 25/25 | 先寫測試，stub 狀態下 t4_bonus 為 2/96（之後補 3 個對照 query 變成 99 項） | — |
+| 測試：t4 48/48、t4_bonus 162/162、t4_surface 40/40；t1 27/27、t1_bonus 11/11、t2 19/19、t2_bonus 37/37、t3 17/17、t3_bonus 25/25 | 先寫測試再實作。T4c 改完測試、還沒改程式時，t4_bonus 是 100/162、t4_surface 34/40 | T4b 時 t4_bonus 是 99/99 |
 | `"open source"` 572 篇、`"lord of the rings"` 82 篇、`e-mail /5 server` 27 篇、`linux /5 kernel` 192 篇 | stop+stem index，N = 34,786 | 每個結果都與測試內的暴力掃描相同；`"open source"` 是 `open /1 source`（603 篇）的子集 |
 | `linux /5 kernel` 中 3 篇只靠「kernel 在 linux 前面」命中 | 由暴力掃描分別算正、反方向找出 | 若只比對單一方向，這 3 篇會漏掉 |
-| `position_match("open source")` 12.6–13.6 ms | 已暖身；每個 token 只讀一次 postings | 只讀兩個 postings（`get_postings` × 2）就要 10.1–10.8 ms，比對本身約占 2–3 ms |
-| `position_match(linux /5 kernel)` 1.9–2.0 ms | 同上；中 df 詞（997、279） | `get_postings` × 2 為 1.4 ms |
-| `position_match(e-mail /5 server)` 25–66 ms | 同上；高 df 詞（`e` 9,596、`mail` 9,357），4 次執行波動很大 | `get_postings` × 3 為 22.3 ms；高 df 時建 doc → positions 對照的成本與讀 postings 相當 |
-| `expand(comput*)` 0.025–0.029 ms；`expand(a*)` 10.0–11.4 ms | 已暖身；`a*` 要把 31,236 個候選依 `(-df, term)` 全部排序 | 總規劃記錄的 `prefix_terms('a')` 約 0.1 ms，所以 `a*` 的成本主要在排序，不在 bisect |
-| k-gram index 建置 0.95 s，建置後約 28.8 MiB（峰值 38.6 MiB） | 573,233 個 term，每個 reader 第一次呼叫 `suggest` 時建一次；記憶體以 `tracemalloc` 量，只算 Python 配置，開 tracemalloc 時建置要 3.85 s | — |
-| `suggest` 快取後 9.3–31.6 ms（`a`、`linux`、`retreival`、`comput`） | k-gram index 已建好 | 不含建置成本；一次 CLI 查詢第一次呼叫還要加約 1 s |
-| `suggest('retreival')` 前三名 `retreiv`、`retrial`、`retriev`；`suggest('retreiv')[0] == 'retriev'` | 輸入是 stem 後的形式（`retreival` 會被 stem 成 `retreiv`，它本身是語料中的錯字，df 11） | `retriev` 的 df 409 ≥ 11 × 10，會觸發建議；`linux`（997）的最佳建議 `linu`（28）不會觸發 |
-| Soundex 對照表建置 0.46 s；`suggest_soundex` 快取後 < 0.1 ms | 每個 reader 一次，只收純 ASCII 字母的 term | — |
+| `position_match("open source")` 12.2 ms；`linux /5 kernel` 1.7 ms；`e-mail /5 server` 25.6 ms | 已暖身；每個 token 只讀一次 postings | `get_postings` × 2 分別是 10.1 ms、1.3 ms；高 df 時建 doc → positions 對照的成本與讀 postings 相當 |
+| 原字詞彙：644,523 個原字、stopword 189 個；tsv 14,191,438 bytes；建置 4.41 s（其中 `normalize_token` 2.78 s） | 來源是未 stem 的 HW1 index | 一致性例外 0（stem 都在 index、index 的 573,233 個 term 都有原字、df 上下界） |
+| **`did_you_mean` 第一次呼叫約 1.6 s**（`load_surface` 0.54 s + 建原字 k-gram 1.06 s + 查詢約 30 ms） | 新 process，lexicon 已載入（讀 lexicon 另需 0.39 s）；峰值 RSS 503 MB | 同一個 process 的第二次呼叫 27 ms |
+| 原字 k-gram index 建置 0.95 s，32.1 MiB（峰值 33.0 MiB）；`load_surface` 75.9 MiB | 每個 reader 一次；`tracemalloc` 只算 Python 配置 | T4b 的 stem 版 k-gram：0.95 s、28.8 MiB（已刪除，不會同時存在兩份） |
+| `suggest` 9.0–45.2 ms（`a`、`linux`、`retreival`、`computer`） | k-gram 已建好 | T4b 的 stem 版 9.3–31.6 ms |
+| `suggest('retreival')` 前三名 `retrieval`（81）、`retrial`（2）、`retreat`（178）；觸發（81 ≥ 1 × 10） | 原字 df；同 stem 的 `retrieved`（140）、`retrieve`（138）因距離較大被去重 | T4b 的 stem 版前三名是 `retreiv`、`retrial`、`retriev`（stem 形式） |
+| `linux`（997）的第一名 `linus`（28）不觸發；`kernal` → `kernel`、`computr` → `computer`、`recieve` → `receive`、`goverment` → `government`、`informaton` → `information` 都觸發 | 原字 df | — |
+| wildcard：`*mon` 2.3 ms（276 個 stem）、`co*tion` 4.6 ms（528）、`*tion*` 12.8 ms（7,482）、`a*` 30.0 ms（31,236）、`comput*` 1.5 ms（64） | 已暖身，k-gram 已建好；取前 100 | T4b 的 `prefix_terms` 版：`comput*` 0.027 ms、`a*` 10–11 ms，但只支援結尾的 `*` |
+| `*x*`（沒有 bigram）81.3 ms | regex 掃過全部 644,523 個原字 | — |
+| Soundex：6,361 種碼，最大一組 1,240 個原字；對照表建置 0.45 s；`expand(SOUNDEX(robert))` 0.12 ms；`suggest_soundex` 0.002 ms | 只收純 ASCII 字母的原字；每個 reader 建一次 | T4b 的 stem 版對照表 0.46 s（已刪除） |
 
 ### 10.3 遇到的困難與解法
 - **proximity 的兩邊可能是多詞**：`e-mail` 經過 `process` 會變成 `e`、`mail` 兩個 token，原本「兩個位置差 ≤ k」的定義不適用。解法：兩邊都視為 phrase，先各自找出位置區間，再算兩段區間之間的間隔；單一 token 是長度為 0 的區間，所以舊定義是新定義的特例。
 - **方向**：`a /5 b` 很容易只寫成「b 在 a 後面」。解法：兩個方向都比，並在測試中用暴力掃描分別找出只靠反方向命中的文件（`e-mail /5 server` 的 doc 1400、`linux /5 kernel` 的 3 篇），確認它們都在結果中。
 - **讀 postings 很貴**：`get_postings` 每次都重新開檔並解出全部 positions。解法：每個不同的 token 只讀一次（Near 兩側、`"new new york"` 中重複的 token 共用），依 df 由小到大讀，交集一變空就停；測試用 spy 檢查呼叫次數。
 - **stopword 會讓運算元消失**：`the /3 linux`、`"open source" /3 the` 的一側是空的。解法：退化成另一側並警告；另一側是多詞時保留 phrase，不轉成一般的 AND，以免失去相鄰條件。
-- **測試的預期值不能來自被測程式**：解法：測試內另寫一個暴力版本（每篇文件建「位置 → term」表、掃過每個起點、兩層迴圈比區間），寫法刻意和實作不同；原本選的 `"new new york"` 在 index 中是 0 篇，對照沒有意義，所以換成有結果的 `"bye bye"`、`"step by step"`。
+- **index 只有 stem，使用者看到的卻是原字**：T4b 的拼字建議是 `retriev`，`computing*` 也對不到 `comput`。解法：另建原字詞彙層，所有「和使用者的字比對」的功能都在原字上做，最後才轉成 stem 查 index。原字的 stem 一定要和 index 用同一段程式算：直接對單一原字呼叫 `process` 會因為 spaCy 重新切字而有 631 個不一致，所以把 `process` 的單 token 步驟抽成 `normalize_token`，並用 golden 值證明 `process` 的行為不變。
+- **同一個 stem 的原字會擠滿建議清單**：`retreival` 的候選有 `retrieval`、`retrieved`、`retrieve`，改哪一個 query 都一樣。解法：依 stem 去重，保留距離最小的原字；與輸入同 stem 的候選（`retreived`）直接排除，因為改了也不會改變結果。
+- **k-gram 只是篩選**：`ab*ba` 的 bigram 也全部出現在 `aba` 中。解法：k-gram 交集之後一定再用 regex 完整比對；regex 只把 `*` 當萬用字元（不用 `fnmatch`，它會把 `?`、`[...]` 也當萬用字元）。
+- **測試的預期值不能來自被測程式**：解法：測試內另寫暴力版本，寫法刻意和實作不同（phrase：每篇文件建「位置 → term」表、掃過每個起點；wildcard：`fnmatch` 全掃；拼字：全掃算 Jaccard、完整 DP 表算 OSA；Soundex：自己分組）。
 
 ### 10.4 限制
-- **stem 對 wildcard 的影響**：dictionary 存的是 stem 後的詞，而 wildcard 的 prefix 只做 casefold、不做 stem。prefix 要寫成 stem 後的樣子才對得到：`comput*` 有 64 個結果，`computing*` 卻是 0 個（`computing` 被 stem 成 `comput`），會被移除並警告。只支援結尾的 `*`，不支援 `*comp`、`co*ut`。
-- **wildcard 會截斷**：超過 100 個 term 時只取 df 最高的 100 個（`a*` 的 31,236 個只用 100 個），df 低的 term 不會被比對到；會發出警告，但結果不完整。
-- **stem 對拼字建議的影響**：建議的是 stem 形式（`retriev`，不是 `retrieval`），畫面上要說明。語料中的錯字本身也可能在 dictionary 裡（`retreiv` 的 df 是 11），所以觸發條件除了「df == 0」還要比較 df 差距；即使如此，常見詞也可能被建議成罕見的拼法（`linux` 的第一名是 `linu`），只是不會達到觸發門檻。
-- **拼字建議只提供建議，不自動替換**：`suggest` 只回傳候選，由 T7 判斷是否顯示「Did you mean」，query 本身不會被改寫。第一次呼叫要建 k-gram index（約 1 s、約 29 MiB），單次 CLI 查詢會付這個成本；Soundex 碰撞很多（`R361` 同時包含 `retriev`、`rutherford`、`retrofit`），只適合當輔助建議，而且只處理 ASCII 字母。
-- **Soundex 是為人名設計的，用在一般檢索中效果有限**：它只看第一個字母加上前三個子音的類別。這套編碼原本用來把拼法不同的同音人名歸成一組（`robert`／`rupert`、`smith`／`smyth`、`stephen`／`steven` 同碼），但一般詞的碰撞非常多：原字詞彙只有 6,361 種碼，最大的一組有 1,240 個原字。所以 `SOUNDEX(robert)`（§6.8.5，計畫中）展開成的 214 個 stem 中，df 最高的是 `report`、`refer`，`robert` 只排第 3，結果會被一般詞主導。反過來，同音但第一個字母不同（`catherine` C365／`kathryn` K365），或子音類別不同（`thompson` T512／`thomson` T525）時，也對不到。`suggest_soundex` 只是依 df 排序挑出同碼的詞，沒有判斷「像不像」，同樣只能當輔助。
-- **選用功能的性質**：T4b 的語法都是加法，一般文字的 query 結果與 T4a 相同（t4 48/48）。champion list（T2／T3 建置、T6 選用、預設關閉）不屬於 T4，T4b 不使用也不依賴它；champion 是不精確的 top-k，它和 Phrase／Near 一起使用時的排序品質沒有量測，是否開放由 T6 決定。拼字建議、Soundex 也一樣是選用的輔助功能。
-- **proximity 的距離定義要寫在文件中**：距離以 index 的 token 位置計算，含 stopword 空洞（`linux the kernel` 的間隔是 2），所以使用者看到的距離和「中間隔了幾個有意義的詞」不同；兩段區間重疊不算命中，`a /5 b /5 c` 這種串接不支援（第二個 `/5` 的左側視為空的，退化並警告）。
-- **計時只代表暖身後的單次呼叫**：高 df 詞（`e-mail /5 server`）的時間在不同次執行間波動很大（25–66 ms），沒有量冷磁碟，也沒有量整個 CLI 查詢的時間。
+- **Soundex 是為人名設計的，用在一般檢索中效果有限**：它只看第一個字母加上前三個子音的類別。這套編碼原本用來把拼法不同的同音人名歸成一組（`robert`／`rupert`、`smith`／`smyth`、`stephen`／`steven` 同碼，實測 `SOUNDEX()` 都能互相找到），但一般詞的碰撞非常多：原字詞彙只有 6,361 種碼，最大的一組有 1,240 個原字。`SOUNDEX(robert)` 展開成 214 個 stem，df 最高的是 `report`、`refer`，`robert` 只排第 3，`rupert` 排第 20，結果會被一般詞主導；`suggest_soundex('robert')` 的前 5 名是 `report`、`referred`、`reproduced`、`reproduction`、`roberto`，只依 df 排序，沒有判斷「像不像」。反過來，同音但第一個字母不同（`catherine` C365／`kathryn` K365），或子音類別不同（`thompson` T512／`thomson` T525）時，也對不到。而且只處理 ASCII 字母。所以 Soundex 只能當輔助功能。
+- **`did_you_mean` 第一次呼叫的成本**：第一次呼叫要讀 `surface_vocab.tsv`（0.54 s）並建原字 k-gram index（1.06 s），在新的 process 中約 **1.6 s**（lexicon 已載入的情況；之後每次約 10–45 ms），記憶體約 76 + 32 MiB。單次 CLI 查詢每次都要付這個成本，所以建議 T7 只在結果很少時才呼叫。第一次使用 wildcard 或 `SOUNDEX()` 也要付 `load_surface` 的 0.54 s（wildcard 另加 k-gram 的 1 s，SOUNDEX 另加對照表的 0.45 s）。
+- **拼字建議不認識語意**：正確的罕見詞也可能觸發，例如人名 `linus`（28）會被建議成 `links`（9,251）。短字的對調（`teh` → `the`）在 bigram Jaccard 下篩不進候選，而且 `the` 是 stopword，本來就會被排除。語料中的錯字本身也在詞彙裡（`retreival` 的 df 是 1），所以觸發條件除了「df == 0」還要比較 df 差距。只提供建議，不自動替換。
+- **wildcard 會截斷**：超過 100 個 stem 時只取 df 最高的 100 個（`a*` 的 31,236 個只用 100 個），df 低的 term 不會被比對到；會發出警告，但結果不完整。
+- **wildcard 在原字上比對、在 stem 上檢索**：比對到的原字再轉成 stem，所以結果可能包含形式上不符合 pattern 的 stem（`computers*` 包含 `comput`，因為 `computers` 被 stem 成 `comput`），而 `comput` 又會比對到 `computing`、`computation` 等文件。只有 `*` 是萬用字元，不支援 `?`、`[...]`。沒有任何 bigram 的 pattern（`*x*`）要掃過全部原字（約 81 ms）。
+- **原字詞彙需要另外建置**：`surface_vocab.*` 由未 stem 的 HW1 index 建出，TA 手上不一定有，所以繳交時附上（13.5 MiB）。檔案不存在時，含 wildcard／SOUNDEX 的 query 會拋 `FileNotFoundError`；一般 query 不受影響（`expand` 不讀檔）。
+- **選用功能的性質**：T4b／T4c 的語法都是加法，一般文字的 query 結果與 T4a 相同（t4 48/48）。champion list（T2／T3 建置、T6 選用、預設關閉）不屬於 T4，T4 不使用也不依賴它；champion 是不精確的 top-k，它和 Phrase／Near 一起使用時的排序品質沒有量測，是否開放由 T6 決定。拼字建議、Soundex 也一樣是選用的輔助功能。
+- **proximity 的距離定義要寫在文件中**：距離以 index 的 token 位置計算，含 stopword 空洞（`linux the kernel` 的間隔是 2），所以使用者看到的距離和「中間隔了幾個有意義的詞」不同；兩段區間重疊不算命中，`a /5 b /5 c` 這種串接不支援（第二個 `/5` 的左側視為空的，退化並警告）。`SOUNDEX(x)` 不能當 Near 的一側。
+- **計時只代表本機的單次呼叫**：高 df 詞（`e-mail /5 server`）的時間在不同次執行間波動很大（T4b 時量到 25–66 ms），沒有量冷磁碟，也沒有量整個 CLI 查詢的時間。

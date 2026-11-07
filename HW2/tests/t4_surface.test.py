@@ -4,7 +4,9 @@
   uv run python HW2/src/build_surface_vocab.py
   uv run python HW2/tests/t4_surface.test.py
 
-對應 T4.md §6.8.8 第 7 節「原字詞彙層與一致性」，另加 load_surface 的基本行為與計時。
+對應 T4.md §6.8.8 第 7 節「原字詞彙層與一致性」，另加 load_surface 的基本行為與計時；
+第 6、7 節是 SurfaceVocab 的資料結構：原字 k-gram index（§6.8.2）與 Soundex 分組（§6.8.5）。
+拼字、wildcard、SOUNDEX 的功能測試在 t4_bonus.test.py。
 一致性檢查在測試內直接讀 tsv 重新計算，不信任 meta 記錄的數字，也不經過 load_surface。
 meta 竄改只在 tempfile 目錄進行（symlink 指向 HW2/index），不修改 HW2/index 本身。
 """
@@ -308,7 +310,86 @@ else:
     print("  [SKIP] 沒有 HW1/output，略過重新建置")
 
 # ===========================================================================
-section("6. 計時（不設門檻）")
+section("6. 原字 k-gram index（§6.8.2）")
+# ===========================================================================
+import spelling  # noqa: E402  （放在這裡：前 5 節只測資料層）
+
+
+def own_bigrams(w: str) -> set[str]:
+    """測試內自己寫的 bigram（前後加 $），不 import surface.bigrams。"""
+    s = "$" + w + "$"
+    return {s[i:i + 2] for i in range(len(s) - 1)}
+
+
+results.append(run("surface.bigrams('ab') == {'$a','ab','b$'}，與測試內的寫法一致", lambda: (
+    surface.bigrams("ab") == {"$a", "ab", "b$"}
+    and all(surface.bigrams(w) == own_bigrams(w) for w in ["retrieval", "a", "e-mail", "café"]),
+    f"{sorted(surface.bigrams('ab'))}")))
+results.append(run("spelling 不再有 _bigrams／_kgram_index／_kgram_cache，改用 surface.bigrams", lambda: (
+    not any(hasattr(spelling, n) for n in ("_bigrams", "_kgram_index", "_kgram_cache"))
+    and spelling.bigrams is surface.bigrams,
+    f"殘留：{[n for n in ('_bigrams', '_kgram_index', '_kgram_cache') if hasattr(spelling, n)]}")))
+results.append(run("pattern_bigrams：co*tion、*mon、computers*、*x*（沒有 bigram）", lambda: (
+    surface.pattern_bigrams("co*tion") == {"$c", "co", "ti", "io", "on", "n$"}
+    and surface.pattern_bigrams("*mon") == {"mo", "on", "n$"}
+    and surface.pattern_bigrams("computers*") == {"$c", "co", "om", "mp", "pu", "ut", "te", "er", "rs"}
+    and surface.pattern_bigrams("*x*") == set() and surface.pattern_bigrams("*q*z*") == set(),
+    f"co*tion→{sorted(surface.pattern_bigrams('co*tion'))}")))
+
+KG_GRAMS = ["$q", "zz", "x$", "q$", "$x", "ij", "oo"]
+
+
+def _kgram_struct():
+    index, sizes = sv.kgram()
+    again = sv.kgram()
+    bad_sizes, want = [], {g: [] for g in KG_GRAMS}
+    for i, w in enumerate(words):
+        bg = own_bigrams(w)
+        if sizes[i] != len(bg):
+            bad_sizes.append((w, sizes[i], len(bg)))
+        for g in KG_GRAMS:
+            if g in bg:
+                want[g].append(i)
+    bad_post = [g for g in KG_GRAMS if list(index.get(g, ())) != want[g]]
+    unsorted = [g for g, a in index.items() if any(a[j - 1] >= a[j] for j in range(1, len(a)))]
+    total = sum(len(a) for a in index.values())
+    ok = (again[0] is index and len(sizes) == COUNT and not bad_sizes and not bad_post and not unsorted
+          and total == sum(sizes) and all(a[-1] < COUNT for a in index.values()))
+    return ok, (f"{len(index)} 種 bigram、共 {total} 個 id；sizes 不符 {bad_sizes[:SHOW]}；"
+                f"posting 不符 {bad_post}；未排序 {unsorted[:SHOW]}；"
+                + "、".join(f"{g} {len(want[g])}" for g in KG_GRAMS))
+
+
+results.append(run("kgram()：快取、sizes 等於每個原字的 bigram 數、posting 遞增且與暴力相同", _kgram_struct))
+
+# ===========================================================================
+section("7. Soundex 分組（§6.8.5，整個專案只有這一份）")
+# ===========================================================================
+
+
+def _soundex_groups():
+    groups = sv.soundex_groups()
+    want: dict[str, set[int]] = defaultdict(set)
+    for i, w in enumerate(words):
+        if w.isascii() and w.isalpha():
+            want[spelling.soundex(w)].add(i)
+    same = {c: set(v) for c, v in groups.items()} == dict(want)
+    unsorted = [c for c, v in groups.items()
+                if [(-dfs[i], words[i]) for i in v] != sorted((-dfs[i], words[i]) for i in v)]
+    biggest = max(want.values(), key=len)
+    ok = groups is sv.soundex_groups() and same and not unsorted
+    return ok, (f"{len(groups)} 種碼（暴力 {len(want)}），最大一組 {len(biggest)} 個原字；"
+                f"內容相同 {same}；未依 (-df, word) 排序的碼 {unsorted[:SHOW]}")
+
+
+results.append(run("soundex_groups()：快取、與暴力分組相同、每組依 (-原字 df, 原字) 排序", _soundex_groups))
+results.append(run("R163 同時含 robert、rupert；S530 含 smith、smyth", lambda: (
+    {sv.word_id["robert"], sv.word_id["rupert"]} <= set(sv.soundex_groups()["R163"])
+    and {sv.word_id["smith"], sv.word_id["smyth"]} <= set(sv.soundex_groups()["S530"]),
+    f"R163 {len(sv.soundex_groups()['R163'])} 個原字")))
+
+# ===========================================================================
+section("8. 計時（不設門檻）")
 # ===========================================================================
 
 

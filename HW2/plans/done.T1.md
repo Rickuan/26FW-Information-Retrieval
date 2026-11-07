@@ -27,6 +27,7 @@ class IndexReader:
 class Preprocessor:
     @classmethod
     def from_config(cls, cfg: dict) -> "Preprocessor": ...  # 缺 lemma 時預設 False；缺其他欄位拋 ValueError
+    def normalize_token(self, tok: str) -> str | None: ...  # T4c 抽出：process 對單一 token 做的步驟；stopword 回傳 None（§9.1）
 ```
 使用範例：
 ```python
@@ -44,7 +45,7 @@ print(reader.N, {t: reader.df(t) for t in terms})               # 34786 {'open':
 | `HW2/src/writer.py:412` `get_postings` | 解包改成 `_df, offset, length = lexicon[term]`，其餘不動 |
 | `HW2/src/writer.py:447-450` `N` | `return int(self.get_metadata()["N"])` |
 | `HW2/src/writer.py:452-458` `df` | `entry = self._load_lexicon().get(term)`；`return entry[0] if entry else 0` |
-| `HW2/src/tokenizer.py:107-114` `from_config` | 嚴格模式：`cfg` 是 `None` 或 `{}` 時拋出 `ValueError`。`casefold`、`stopword`、`stem` 缺任何一個也拋出 `ValueError`，訊息列出缺少的欄位（例如 `missing = [k for k in ("casefold", "stopword", "stem") if k not in cfg]`）。只有 `lemma` 可以缺，缺時用 `cfg.get("lemma", False)`。未知欄位忽略。（docstring 已更新為嚴格模式） |
+| `HW2/src/tokenizer.py:107-114` `from_config`（T4c 重構後是 `:113-130`） | 嚴格模式：`cfg` 是 `None` 或 `{}` 時拋出 `ValueError`。`casefold`、`stopword`、`stem` 缺任何一個也拋出 `ValueError`，訊息列出缺少的欄位（例如 `missing = [k for k in ("casefold", "stopword", "stem") if k not in cfg]`）。只有 `lemma` 可以缺，缺時用 `cfg.get("lemma", False)`。未知欄位忽略。（docstring 已更新為嚴格模式） |
 
 `from_config` 採嚴格模式的理由：如果悄悄套用預設值，query 端的前處理會和 index 不一致，結果全錯，卻不會有任何錯誤訊息。
 
@@ -53,7 +54,7 @@ df 和 offset 放在同一個 tuple，不另開 dict，這樣 57 萬個 term 不
 **與總規劃（`HW2/plans/00-overview.md`）的差異**
 - 總規劃寫「直接改 HW1 的 writer.py／tokenizer.py」，實際上改的是 `HW2/src/` 的副本，`HW1/` 不動。（已回寫）
 - 總規劃寫「把 `HW1/output` 複製到 `HW2/index/`」，實際來源是 `HW1/output_main`。（已回寫）
-- `writer.py:352`、`:381`、`:402`、`:427` 仍然正確；`tokenizer.py:94-106` 也正確。stub 的位置在 `writer.py:447-458`、`tokenizer.py:107-114`。
+- `writer.py:352`、`:381`、`:402`、`:427` 仍然正確；`tokenizer.py:94-106` 也正確。stub 的位置在 `writer.py:447-458`、`tokenizer.py:107-114`。（以上是 T1 當時的行號。T4c 重構後，`normalize_token` 是 `tokenizer.py:94-104`、`process` 是 `:106-112`、`from_config` 是 `:113-130`，見 §9.1。）
 - 總規劃說「三處重複的設定還原」在 `main.py:104`、`:214`、`:423`。實際上 `main.py` 只存在 `HW1/src/`，沒有複製到 `HW2/src`。三處的 `Preprocessor(` 分別在第 103、214、423 行，其中只有 214 是從 metadata 還原，另外兩處是從 CLI 參數建立。另有一處 `HW1/src/verify_output.py:64-69` 也是從 metadata 還原，而且沒有讀 lemma。T1 不改這些地方。
 
 ## 5. 驗收測試（`HW2/tests/t1.test.py`）
@@ -117,6 +118,10 @@ df 和 offset 放在同一個 tuple，不另開 dict，這樣 57 萬個 term 不
 - 加分 `HW2/tests/t1_bonus.test.py`：實作前 0/11，實作後 11/11。
 - 第 3 節的接口簽名都沒有改。改到的檔案只有 `HW2/src/writer.py`、`HW2/src/tokenizer.py`，另外新增了兩個測試檔。
 - `HW2/src/` 裡沒有其他模組讀 `_lexicon`／`_load_lexicon`（已 grep 確認），tuple 從 2 欄改成 3 欄只影響 `get_postings`。
+- **T4c 的 `normalize_token` 重構**（T1 完成後，由 `T4.md` §6.8.1 第 3 步、§8 G1 追加）：T4c 在 `tokenizer.py` 抽出 `Preprocessor.normalize_token(tok) -> str | None`（`:94-104`），內容是 `process` 對單一 token 做的步驟：casefold → stopword（回傳 `None`）→ lemma 或 stem（只處理 `isalpha` 的 token）。`process`（`:106-112`）改成呼叫它，行為不變；`from_config` 本身沒改，只是往下移 6 行（`:113-130`，原本 `:107-124`）。`build_surface_vocab.py` 與 `surface.surface_stem` 用它算原字的 stem，不另外實作 stopword 判斷或 stem。
+  - **行為不變的證明**（`t1.test.py` 新增「`process` 重構」一節，原有 15 項不改）：48 個輸入 × 4 種設定（HW2 stop+stem、HW1 casefold only、`casefold=False`、stop+lemma）的 golden 值，在重構前產生並先跑過；組合關係 `process(text) == [(p, n) for p, t in enumerate(tokenize(text), 1) if (n := normalize_token(t)) is not None]`；用 `patch.object` 計數，確認 `process` 對每個 token 都呼叫 `normalize_token`。重構前 19/27（組合關係與呼叫計數因為還沒有 `normalize_token` 而 FAIL），重構後 **27/27**。
+  - `indexer.py` 不必改，index 不必重建：`process` 的輸出不變，`t1_bonus`、`t2`、`t3`、`t4` 系列也照樣全過（`T4.md` §9.1.3、§9.1.4）。
+  - 用 `normalize_token` 建出的原字詞彙層（`T4.md` §9.1.3）：`build_surface_vocab.py` 全程 4.41 s，其中 `normalize_token` × 644,523 個原字 2.78 s；`surface_vocab.tsv` 14,191,438 bytes；一致性例外（stem 不在 index、index term 沒有原字、df 上下界）全部是 0；查詢時 `load_surface` 0.54 s、75.9 MiB。
 
 ### 9.2 與計畫的差異
 - **測試多了一項**：核心測試除了 `from_config({})`，也測 `from_config(None)` 會拋 `ValueError`（第 8 節已決定，但第 5 節的清單沒有列）。所以核心是 15 項，比第 5 節列出的多。
@@ -124,7 +129,7 @@ df 和 offset 放在同一個 tuple，不另開 dict，這樣 57 萬個 term 不
 - **`from_config` 的錯誤訊息**：`cfg` 為空時是 `preprocessor config is empty: {}`（或 `None`）；缺欄位時是 `preprocessor config missing fields: stopword, stem`。
 - **`IndexReader.__init__` 新增 `self._vocab`**：這是 `vocabulary()` 的快取，第 6.2 節沒有寫明要放在哪裡。
 - **`prefix_terms` 多處理一個邊界情況**：prefix 最後一個字元是 U+10FFFF 時無法 `chr(ord(c) + 1)`，改成從 `lo` 往後線性掃描 `startswith`。其他情況照第 6.1 節的寫法。上界的 `bisect_left` 從 `lo` 開始找。
-- **行號位移**：`writer.py` 第 23 行新增 `from bisect import bisect_left`，之後的行號全部 +1；`__init__` 多了一行，`_load_lexicon` 之後的行號再 +1。新行號：`IndexReader` :353、`_load_lexicon` :374（存 df 在 :384）、`get_postings` :404（解包在 :414）、`get_doc` :420、`get_metadata` :429、`N` :449-452、`df` :454-461、`vocabulary` :490、`prefix_terms` :500。`tokenizer.py` `from_config` 仍在 :107-108 起，`process` 仍在 :94。
+- **行號位移**：`writer.py` 第 23 行新增 `from bisect import bisect_left`，之後的行號全部 +1；`__init__` 多了一行，`_load_lexicon` 之後的行號再 +1。新行號：`IndexReader` :353、`_load_lexicon` :374（存 df 在 :384）、`get_postings` :404（解包在 :414）、`get_doc` :420、`get_metadata` :429、`N` :449-452、`df` :454-461、`vocabulary` :490、`prefix_terms` :500。`tokenizer.py` `from_config` 仍在 :107-108 起，`process` 仍在 :94。（T4c 重構後：`normalize_token` :94-104、`process` :106-112、`from_config` :113-130，見 §9.1。）
 
 ### 9.3 量測（本機 WSL2，`perf_counter`）
 | 項目 | 時間 |
