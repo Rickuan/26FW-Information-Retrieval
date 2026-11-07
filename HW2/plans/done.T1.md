@@ -71,7 +71,7 @@ df 和 offset 放在同一個 tuple，不另開 dict，這樣 57 萬個 term 不
 兩項都是新增的 method，不改動核心接口。stub 已在 `writer.py` 建立。
 
 ### 6.1 `prefix_terms`（優先度：中）
-- **評分面向**：query 多樣性（wildcard 的基礎）、效率
+- **評分面向**：query 多樣性（T4b 最初的 wildcard 使用；T4 §6.8 之後改用原字 k-gram）、效率
 - **接口**：`IndexReader.prefix_terms(prefix: str) -> list[str]`（`writer.py:494`）。依字典序回傳以 prefix 開頭的 term；空字串拋出 `ValueError`。
 - **改動**：`writer.py`。對 `vocabulary()` 用 `bisect_left(vocab, prefix)` 到 `bisect_left(vocab, prefix[:-1] + chr(ord(prefix[-1]) + 1))` 切片。
 - **選型**：比較 HW1 的 `RadixTrie`（`trie.py:35`，`prefix_search` 在 `:108`）和「排序 list + bisect」。下表已在本 index 上預先量測（`perf_counter` + `tracemalloc`），兩者回傳的結果完全相同：
@@ -144,7 +144,7 @@ df 和 offset 放在同一個 tuple，不另開 dict，這樣 57 萬個 term 不
 ### 10.1 主要特色
 1. **query 端的前處理一定和 index 一致**：`Preprocessor.from_config` 只從 `metadata.json` 還原設定，而且採嚴格模式，缺欄位就拋 `ValueError`。前處理不一致不會報錯，只會讓分數全錯，所以值得用嚴格模式擋住。
 2. **df 不另開 dict**：lexicon 的 tuple 從 `(offset, length)` 擴成 `(df, offset, length)`，57 萬個 term 不會多一份 key 的記憶體，T3 也直接沿用同一個 lexicon。
-3. **prefix 查詢用排序 list + bisect，不用 HW1 的 RadixTrie**：`lexicon.tsv` 本身已排序，不必另外建結構，就能當作 wildcard（T4b）的基礎。
+3. **prefix 查詢用排序 list + bisect，不用 HW1 的 RadixTrie**：`lexicon.tsv` 本身已排序，不必另外建結構。T4b 最初的 wildcard 用它做 prefix 展開；T4 §6.8 之後，wildcard 改在原字詞彙的 k-gram index 上展開，不再呼叫 `prefix_terms`，但它仍是 T1 的公開接口（`t1_bonus` 有測試）。
 
 ### 10.2 量測數據
 皆在本機 WSL2 上用 `perf_counter` 量測（記憶體用 `tracemalloc`），只量一台機器。
@@ -166,5 +166,5 @@ df 和 offset 放在同一個 tuple，不另開 dict，這樣 57 萬個 term 不
 - **每次 CLI 查詢都要付約 0.4 s 的 lexicon 載入**，這是啟動成本，與單次 `df()` 或 prefix 查詢的時間要分開看。
 - **`vocabulary()` 回傳的是共用的快取 list**，呼叫端修改它會影響之後所有呼叫；程式沒有保護，只靠約定。
 - **與 RadixTrie 的比較只能說「建置快很多」**：實作紀錄只有 RadixTrie 建置時間（1.31 s；計畫階段另量到 3.95 s，兩次差很多），沒有重測它的查詢時間，不能寫出精確的查詢加速倍數。
-- **prefix 是對 stem 後的 dictionary 比對**，prefix 本身不做 stem，所以 `computing*` 對不到 `comput`（T4b 的已知限制，原因在 T1 的資料形式）。
+- **prefix 是對 stem 後的 dictionary 比對**，prefix 本身不做 stem，所以 `computing*` 對不到 `comput`（T4b 的已知限制，原因在 T1 的資料形式）。T4 §6.8 改在原字上比對後，`computing*` 會展開成 `comput`，wildcard 的這個限制已解除；`prefix_terms` 本身的行為不變。
 - **HW1 裡的設定還原沒有修**：`main.py query` 預設仍讀未 stem 的 `HW1/output`，`verify_output.py` 也沒有讀 lemma；T1 依範圍不動 `HW1/`。
