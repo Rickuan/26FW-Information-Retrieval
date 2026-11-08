@@ -18,11 +18,11 @@ sim(d_j, q) = \frac{\sum_{i} w_{i,j} \, w_{i,q}}{\sqrt{\sum_{i} w_{i,j}^2} \; \s
 ## 整體架構
 
 檔案配置（T1–T4 已完成，T5–T7 待實作）：
-- `weighting.py`、`build_norms.py`、`build_champions.py`：W 權重與 T2 norm、champion 建置（已完成，見 `done.T2.md`）
-- `writer.py`：T1、T2、T3 Index 讀取核心（df、N、get_norms、get_doc_tf、get_champions、快取，見 `done.T1.md`–`done.T3.md`）
-- `tokenizer.py`：T1、T4c 前處理器與 `normalize_token`（見 `done.T1.md`、`done.T4.md`）
-- `parser.py`、`positional.py`、`spelling.py`：T4/T4b/T4c AST、語法解析、位置比對、拼字建議（見 `done.T4.md`）
-- `surface.py`、`build_surface_vocab.py`：T4c 原字詞彙層、k-gram 與 Soundex 分組（見 `done.T4.md`）
+- `weighting.py`、`build_norms.py`、`build_champions.py`：W 權重與 T2 norm、champion 建置（已完成，見 `.done.T2-norms-weighting.md`）
+- `writer.py`：T1、T2、T3 Index 讀取核心（df、N、get_norms、get_doc_tf、get_champions、快取，見 `.done.T1-index-reader.md`–`.done.T3-doc-tf-reader.md`）
+- `tokenizer.py`：T1、T4c 前處理器與 `normalize_token`（見 `.done.T1-index-reader.md`、`.done.T4-query-parser.md`）
+- `parser.py`、`positional.py`、`spelling.py`：T4/T4b/T4c AST、語法解析、位置比對、拼字建議（見 `.done.T4-query-parser.md`）
+- `surface.py`、`build_surface_vocab.py`：T4c 原字詞彙層、k-gram 與 Soundex 分組（見 `.done.T4-query-parser.md`）
 - `skip_builder.py`：T5 引入之 Skip 指標與交集演算法（自包含於 `HW2/src/`，不依賴 `HW1/`）
 - `boolean.py`：T5 Boolean 求值（stub，待實作）
 - `rank.py`：T6 VSM 排序（stub，待實作）
@@ -112,19 +112,19 @@ hits  = rank(qtf, cands, reader)      # T6：VSM 計算分數並排序 → T7 �
 
 ### 各模組設計規格
 
-- **T1 Index 載入與前處理還原（已完成，見 `done.T1.md`）**：
+- **T1 Index 載入與前處理還原（已完成，見 `.done.T1-index-reader.md`）**：
   - `HW2/index/` 來自 `HW1/output_main`（stop+stem 版，N = 34,786，573,233 terms）。
   - `IndexReader._load_lexicon` 存 `(df, offset, length)`；提供 `df()`、`vocabulary()` 與 `prefix_terms()`。
   - `Preprocessor.from_config(metadata["preprocessor"])` 採嚴格模式還原設定。
   - `HW1/output`（未 stem 版）僅供 T4c 的 `build_surface_vocab.py` 抽取原字詞彙，不作查詢 index。
-- **T2 文件向量 Norm 與加分項（已完成，見 `done.T2.md`）**：
+- **T2 文件向量 Norm 與加分項（已完成，見 `.done.T2-norms-weighting.md`）**：
   - 獨立腳本 `build_norms.py` 預先計算並產出 `doc_norms.bin`（$|d_j| = \sqrt{\sum w_{ij}^2}$）與 `meta.json`。
   - `IndexReader.get_norms(scheme)` 自動核對來源檔 sha256 並快取；`n` 方案直接回傳全 1.0。
   - 加分：SMART scheme 參數化（`formula()`、`norm_filenames()`）；`build_champions.py` 產出 `champions.r50.*`。
-- **T3 快速讀取與快取（已完成，見 `done.T3.md`）**：
+- **T3 快速讀取與快取（已完成，見 `.done.T3-doc-tf-reader.md`）**：
   - `get_doc_tf(term)` 透過 `mmap` 與直接跳過 positions VByte，大幅提升讀取效率（實測加速 ~3.5x）。
   - 加分：`get_champions(term, r)` 讀取預存名單；`set_doc_tf_cache(maxsize)` 提供 LRU 快取。
-- **T4 Query Parser 與容錯檢索（已完成，見 `done.T4.md`）**：
+- **T4 Query Parser 與容錯檢索（已完成，見 `.done.T4-query-parser.md`）**：
   - 遞迴下降解析 AST（`Term`、`And`、`Or`、`Not`、`Phrase`、`Near`、`Wildcard`、`Soundex`），優先序 `NOT > AND > OR`。
   - 自動簡化空節點、攤平同型巢狀節點；未配對括號/引號、空萬用字元（`*`）、`/0`、非合法 SOUNDEX 拋 `ValueError`。
   - `expand` 於原字詞彙層（`surface_vocab.*`）透過 bigram index + regex 比對萬用字元或 Soundex 分組，依 stem 去重後取前 100 名。
