@@ -21,16 +21,19 @@ sim(d_j, q) = \frac{\sum_{i} w_{i,j} \, w_{i,q}}{\sqrt{\sum_{i} w_{i,j}^2} \; \s
 
 三條橫向箭頭之外，T6 也需要 T1 的 df 與 N。T2 只在 index 建好後跑一次，查詢時直接載入。
 
-檔案配置（stub 都已建立）：
-- `weighting.py`：W 與公式常數，由 T2 負責
-- `build_norms.py`：T2
-- `build_champions.py`：T2 加分
-- `parser.py`：T4
-- `positional.py`、`spelling.py`：T4b
-- `surface.py`、`build_surface_vocab.py`：T4c（原字詞彙層、k-gram、Soundex 分組，已完成，見 `T4.md` §6.8、§9.1.3–§9.1.4）
-- `boolean.py`：T5
-- `rank.py`：T6
-- `search.py`：T7 CLI，尚未建立
+檔案配置（T1–T4 已完成，T5–T7 待實作）：
+- `weighting.py`：W 與公式常數（T2，已完成，見 `done.T2.md`）
+- `build_norms.py`：T2 預算 norm 腳本（已完成，見 `done.T2.md`）
+- `build_champions.py`：T2 加分 champion list 腳本（已完成，見 `done.T2.md`）
+- `writer.py`：T1、T2、T3 Index 讀取核心（已完成，見 `done.T1.md`、`done.T2.md`、`done.T3.md`）
+- `tokenizer.py`：T1、T4c 前處理器與單 token 標準化（已完成，見 `done.T1.md`、`done.T4.md`）
+- `parser.py`：T4 AST 與遞迴下降 parser（已完成，見 `done.T4.md`）
+- `positional.py`：T4b phrase 與 proximity 位置比對（已完成，見 `done.T4.md`）
+- `spelling.py`：T4b/T4c 拼字建議與 Soundex（已完成，見 `done.T4.md`）
+- `surface.py`、`build_surface_vocab.py`：T4c 原字詞彙層、k-gram、Soundex 分組（已完成，見 `done.T4.md` §6.8、§9.1.3–§9.1.4）
+- `boolean.py`：T5 Boolean 求值（stub，待實作）
+- `rank.py`：T6 VSM 排序（stub，待實作）
+- `search.py`：T7 CLI 查詢介面（尚未建立）
 
 T1、T3 改的是 `HW2/src/` 裡從 HW1 複製過來的 `writer.py` 與 `tokenizer.py`，`HW1/` 不動。T4c 已在 `tokenizer.py` 抽出 `Preprocessor.normalize_token`，只是重構，行為不變（`t1.test.py` 27/27，見 `done.T1.md` §9.1）。
 
@@ -38,19 +41,21 @@ T1、T3 改的是 `HW2/src/` 裡從 HW1 複製過來的 `writer.py` 與 `tokeniz
 
 必做部分共 7 項任務，另有一個共用函式 W。任務間只依賴**接口**：第一天先定好簽名並寫 stub，三個人就能平行開工。關鍵路徑是 T1 → T3 → T5 → T6 → T7；T2、T4 是旁支，T1 完成後就能開始。表中 G 編號對應盤點報告的缺口清單。
 
-| 任務 | 對應作業要求 | 盤點缺口 | 直接依賴 | 提供的接口 |
-| --- | --- | --- | --- | --- |
-| W 權重函式（由 T2 負責） | tf-idf 公式（log10） | — | — | `weighting.weight()` |
-| T1 Index 載入、df、前處理還原 | 輸入：HW1 的 inverted index | G1、G4、G10 | — | `IndexReader.df()`、`IndexReader.N`（property）、`Preprocessor.from_config()`  |
-| T2 預算文件 norm | cosine 的 \|d\| | G3 | T1、W | `IndexReader.get_norms()` |
-| T3 只取 doc／tf 的快速讀取 | 評分看效率 | G9 | T1 | `IndexReader.get_doc_tf()` |
-| T4 Query parser | 三種 query 類型 | G5、G6 | T1 | `parse()`、`query_terms()` |
-| T5 Boolean merge（AND／OR） | 簡單 Boolean query | G7 | T3、T4 | `evaluate()` |
-| T6 VSM 排序 | VSM、tf-idf、cosine | G8 | W、T1、T2、T3、T4、T5 | `rank()` |
-| T7 輸出與執行入口 | `<doc#> <score>` 由高到低 | G13 | T6 | `search.py` CLI |
+目前進度：**W、T1、T2、T3、T4 皆已完成並通過單元測試，下游 T5、T6、T7 的所有上游依賴接口已全數就緒。**
+
+| 任務 | 對應作業要求 | 狀態 | 盤點缺口 | 直接依賴 | 提供的接口 |
+| --- | --- | --- | --- | --- | --- |
+| W 權重函式（由 T2 負責） | tf-idf 公式（log10） | ✅ 已完成（PR #22） | — | — | `weighting.weight()` |
+| T1 Index 載入、df、前處理還原 | 輸入：HW1 的 inverted index | ✅ 已完成（PR #21） | G1、G4、G10 | — | `IndexReader.df()`、`IndexReader.N`（property）、`Preprocessor.from_config()`  |
+| T2 預算文件 norm | cosine 的 \|d\| | ✅ 已完成（PR #22） | G3 | T1、W | `IndexReader.get_norms()` |
+| T3 只取 doc／tf 的快速讀取 | 評分看效率 | ✅ 已完成（PR #23） | G9 | T1 | `IndexReader.get_doc_tf()` |
+| T4 Query parser | 三種 query 類型 | ✅ 已完成（PR #24） | G5、G6 | T1 | `parse()`、`query_terms()` |
+| T5 Boolean merge（AND／OR） | 簡單 Boolean query | ⏳ 待開發（stub） | G7 | T3、T4 | `evaluate()` |
+| T6 VSM 排序 | VSM、tf-idf、cosine | ⏳ 待開發（stub） | G8 | W、T1、T2、T3、T4、T5 | `rank()` |
+| T7 輸出與執行入口 | `<doc#> <score>` 由高到低 | ⏳ 待開發 | G13 | T6 | `search.py` CLI |
 
 ### 接口定義
-核心接口如下。加分項新增的參數都有預設值，預設行為與核心相同。所有 stub 都已在 `HW2/src/` 建立。
+核心接口如下。加分項新增的參數都有預設值，預設行為與核心相同。T1–T4 接口均已正式實作並通過完整測試，T5、T6 目前為 stub。
 ```python
 # W — HW2/src/weighting.py（由 T2 負責；rank.py 屬於 T6，避免兩人同時修改）
 LOG_BASE = 10; DEFAULT_SCHEME = "ltc"; FORMULA = "(1+log10 tf)*log10(N/df)"
@@ -144,7 +149,7 @@ build_champions(index_dir, r: int = 50) -> None          # champions.r<r>.{bin,t
 IndexReader.get_champions(term: str, r: int = 50) -> tuple[list[int], list[int]]  # doc 遞增；r < 1、meta／tsv 不符拋 ValueError；檔案不存在拋 FileNotFoundError
 IndexReader.set_doc_tf_cache(maxsize: int) -> None       # 0 = 關閉（預設）
 IndexReader.doc_tf_cache_info() -> tuple[int, int]       # (hits, misses)
-# T4b — spelling.py（T4c 起輸入與回傳都是原字，見 T4.md §6.8.3、§6.8.5）
+# T4b — spelling.py（T4c 起輸入與回傳都是原字，見 done.T4.md §6.8.3、§6.8.5）
 suggest(word: str, reader, limit: int = 5) -> list[str]  # 只提供 Did you mean，不自動替換；原字 k-gram，依 stem 去重
 did_you_mean(word: str, reader, show: int = 3) -> list[str]  # T4c：以原字 df 判斷是否觸發，觸發時回傳 suggest(...)[:show]，否則 []
 soundex(word: str) -> str                                # 只看 ASCII 字母
@@ -173,7 +178,7 @@ hits  = rank(qtf, cands, reader)      # T6 → T7 輸出
 
 - **交接點 T3 → T5**：`get_doc_tf` 只回傳 docID 列表。要換成 `intersect_with_skips` 所需的物件（需有 `.doc_num`／`.skip`），由 skip pointer 負責人在 `boolean.py` 內處理。
 - **交接點 W → T2、T6**：兩邊都只 import `weighting.weight()` 與 `weighting` 的公式常數，不自己寫公式。
-- **還沒完成的上游用暫代品**：T5 先用既有的 `get_postings` 取 docID；T6 先用手算小語料的假 reader 測試。
+- **上游接口現狀**：T1~T4 皆已完成並通過單元測試（包含 Phrase/Near 的 `position_match` 與 `get_doc_tf`），T5、T6 可直接基於正式模組介面開發，無需假 reader 或暫代品。
 
 ### T1 Index 載入、df 與前處理設定還原
 
@@ -199,7 +204,7 @@ hits  = rank(qtf, cands, reader)      # T6 → T7 輸出
   - `IndexReader` 新增 `get_norms(scheme)`。第一次載入時核對 meta（`log_base`、`formula`、`scheme`、`N`、`count`）、來源檔的 size 與 sha256，以及 norm 檔大小（8 × N），不一致就拋 `ValueError`；結果依 scheme 快取。
   - 來源檔核對寫成 `writer.py` 的共用 helper `IndexReader._check_sources`，T3 的 `get_champions` 核對 champion meta 時也要共用它。
   - 權重公式寫成共用函式 `weight(tf, df, N, scheme)`，放在 `weighting.py`，由 T2 實作；T2 和 T6 都呼叫它。
-  - 加分（已完成，見 `T2.md`）：
+  - 加分（已完成，見 `done.T2.md`）：
     - **SMART**：`weight`、`get_norms`、`build_norms`、`norm_filenames` 的 scheme 都是單邊三個字母；新增 `formula(scheme)`。normalization 為 `n` 時 `get_norms` 回傳全 1.0 的陣列、不讀檔，`build_norms` 與 `norm_filenames` 拋 `ValueError`；非 ltc 的 c 方案檔名帶 scheme（`doc_norms.<scheme>.bin`／`.meta.json`）。lnc 等非預設方案的 norm 檔要先執行 `build_norms.py --scheme X` 才會存在，否則 `get_norms(X)` 拋 `FileNotFoundError`。
     - **Champion list**：`build_champions.py` 產生 `champions.r50.{bin,tsv,meta.json}`。只收 df > r 的 term，依 `(-tf, doc)` 取前 r 筆再依 doc 遞增寫出；r = 50 時共 15,755 個 term。block 格式是 `u32be n` + n × `[VByte Δdoc][VByte tf]`，沒有 positions。
 - **注意**
@@ -207,14 +212,14 @@ hits  = rank(qtf, cands, reader)      # T6 → T7 輸出
   - 不要拿 `doc_len` 當 norm，它只是過濾 stopword 後的 token 數。
   - 唯一的空文件是 doc 24621（`doc_len = 0`），c 方案下 norm 為 0；df = N 的 term 權重為 0。
   - 實測 `build_norms`（ltc）約 15–16 秒、峰值 221 MB；`build_champions`（r = 50）約 15 秒。跑一次即可，不必優化。
-- **對應接口**：`postings.bin` + `lexicon.tsv` + `metadata.json`；`postings.bin` 只開一次，依 `IndexReader._load_lexicon` 的 offset／length 讀 block，用 `writer.py` 的 `decode_postings_block` 解碼（不用 `IndexReader.get_postings`，它每次呼叫都重新開檔）。已決定 `build_norms`、`build_champions` 都不改用 `get_doc_tf`（見 `T3.md` §9.2）。
+- **對應接口**：`postings.bin` + `lexicon.tsv` + `metadata.json`；`postings.bin` 只開一次，依 `IndexReader._load_lexicon` 的 offset／length 讀 block，用 `writer.py` 的 `decode_postings_block` 解碼（不用 `IndexReader.get_postings`，它每次呼叫都重新開檔）。已決定 `build_norms`、`build_champions` 都不改用 `get_doc_tf`（見 `done.T3.md` §9.2）。
 
 ### T3 只取 doc／tf 的快速讀取
 
 - **作業要求**：加分評分看「scoring／ranking 效率」。
-- **做法**：新增 `get_doc_tf(term) -> (doc_nums, tfs)`。讀到 n\_pos 後直接跳過那些 position 的 VByte，不建 `Posting` 物件。`postings.bin` 用 `mmap`（`ACCESS_READ`）開啟一次並快取，每次查詢只做記憶體切片。解完會核對 block 的結束位置等於 `offset + length`、df 標頭等於 lexicon 的 df，不符拋 `ValueError`。全 index 掃描會碰到 `postings.bin` 的全部 63 MB，這些 mmap 的 file-backed 分頁會算進 RSS。加分：`get_champions()` 與 LRU 快取，見 `T3.md`。
+- **做法**：新增 `get_doc_tf(term) -> (doc_nums, tfs)`。讀到 n\_pos 後直接跳過那些 position 的 VByte，不建 `Posting` 物件。`postings.bin` 用 `mmap`（`ACCESS_READ`）開啟一次並快取，每次查詢只做記憶體切片。解完會核對 block 的結束位置等於 `offset + length`、df 標頭等於 lexicon 的 df，不符拋 `ValueError`。全 index 掃描會碰到 `postings.bin` 的全部 63 MB，這些 mmap 的 file-backed 分頁會算進 RSS。加分：`get_champions()` 與 LRU 快取，見 `done.T3.md`。
 - **注意**：position 仍是 VByte，要跳過就必須逐個讀出結束位元，無法直接 seek。既有的 `get_postings` 保持不動，留給 phrase／proximity 使用。
-- **對應接口**：posting 磁碟格式 `[Δdoc][tf][n_pos][Δpos…]`（寫入 `writer.py` `encode_postings_block`、讀取 `writer.py` `decode_postings_block`）；HW2 實測（暖身後 5 次中位數，見 `T3.md` §9.1）：`home` 由 `get_postings` 23.779 ms 降到 `get_doc_tf` 6.549 ms（3.63x），`new` 由 21.987 ms 降到 6.326 ms（3.48x）；加速主要來自跳過 positions，mmap 的貢獻可忽略。
+- **對應接口**：posting 磁碟格式 `[Δdoc][tf][n_pos][Δpos…]`（寫入 `writer.py` `encode_postings_block`、讀取 `writer.py` `decode_postings_block`）；HW2 實測（暖身後 5 次中位數，見 `done.T3.md` §9.1）：`home` 由 `get_postings` 23.779 ms 降到 `get_doc_tf` 6.549 ms（3.63x），`new` 由 21.987 ms 降到 6.326 ms（3.48x）；加速主要來自跳過 positions，mmap 的貢獻可忽略。
 
 ### T4 Query parser
 
@@ -241,9 +246,9 @@ hits  = rank(qtf, cands, reader)      # T6 → T7 輸出
   - 只有一個遞迴下降 parser，接口是 `parse(query, pre)`。T4a／T4b／T4c 只代表實作順序與 commit 切分：
     - T4a（核心）：`Term`／`And`／`Or`、優先序、空節點規則
     - T4b（加分）：在同一個 parser 加入 NOT、括號、phrase、`/k`、結尾的 `*`，以及拼字建議
-    - T4c（加分，已完成，見 `T4.md` §6.8、§9.1.4）：原字詞彙層（`surface_vocab.*`）、任意位置的 `*`、`SOUNDEX(x)` 運算子，拼字建議改用原字
+    - T4c（加分，已完成，見 `done.T4.md` §6.8、§9.1.4）：原字詞彙層（`surface_vocab.*`）、任意位置的 `*`、`SOUNDEX(x)` 運算子，拼字建議改用原字
 
-    測試分為核心（`t4.test.py`）與加分（`t4_bonus.test.py`）兩組，T4b 合併後核心測試仍要全部通過。見 `T4.md`。
+    測試分為核心（`t4.test.py`）與加分（`t4_bonus.test.py`）兩組，T4b 合併後核心測試仍要全部通過。見 `done.T4.md`。
 - **輸出約定**
   - **純 NOT**（例如 `NOT linux`）：`parse` 回傳 `Not(...)`；`evaluate` 回傳 `set(range(N))` 扣掉 X 的結果；`query_terms` 回傳空的 `Counter()`。
   - **語法錯誤**：`parse` 拋出 `ValueError`，訊息包含字元位置（從 0 起算）。會拋錯的情況：
@@ -294,7 +299,7 @@ hits  = rank(qtf, cands, reader)      # T6 → T7 輸出
     - 文件端：權重用 `weight(tf, df, N, doc_s)`，分母用 `reader.get_norms(doc_s)[doc]`；norm 為 0 的文件（只有 c 方案下的 doc 24621）跳過。`n` 方案的 `get_norms` 回傳全 1.0，不必寫特例。
     - query 端：權重用 `weight(qtf, df, N, q_s)`。第三個字母是 `c` 時除以 |q|，是 `n` 時不除；|q| 由 T6 自己算。
     - 非預設的 c 方案要先執行 `build_norms.py --scheme X` 建好 norm 檔，否則 `get_norms` 拋 `FileNotFoundError`。
-    - 預設 `ltc.ltc` 必須與核心結果完全相同（見 `T2.md` 6.1）。
+    - 預設 `ltc.ltc` 必須與核心結果完全相同（見 `done.T2.md` 6.1）。
   - **不精確 top-k（T2／T3 加分）**：champion list 加一個參數 `champion_r: int | None = None`，不是 `None` 時用 `reader.get_champions(term, champion_r)` 取代 `get_doc_tf`，分母仍用完整的 `get_norms(doc_s)`；index elimination 只用 idf 高於門檻的 term，由 T6 自己做。兩者都必須是可關閉的選項，而且預設關閉。
   - **Wildcard（T4b）、Soundex（T4c）**：沒有接口變動。展開後的每個 term 都會進入 `query_terms`，各計 1 次，照常評分。
   - **NOT（T4b）**：純 `NOT x` 的 query 沒有評分 term。純 NOT 的輸出方式由 T6／T7 負責人決定（見「已知限制」）。
@@ -317,7 +322,7 @@ hits  = rank(qtf, cands, reader)      # T6 → T7 輸出
   - **T4b／T4c 語法**：沒有接口變動，`parse(query, pre)` 合併後就自動支援新語法。`parse` 拋出的 `ValueError`（引號或括號沒有配對、wildcard 只有 `*`、`/0`、`SOUNDEX()` 的參數錯誤，見 T4「語法錯誤」）要印出訊息並以非 0 結束，不印 traceback。`expand` 在 `surface_vocab.*` 不存在時拋 `FileNotFoundError`、meta 與 index 不符時拋 `ValueError`，同樣印出訊息並以非 0 結束。`parse` 或 `expand` 回傳 `None` 時輸出空結果（見「查詢流程」）。
   - **純 NOT 的 query**：`node` 不是 `None` 但 `qtf` 是空的。純 NOT 的輸出方式由 T6／T7 負責人決定。
   - **警告**：把 `parse` 與 `expand` 發出的警告（空運算元、wildcard 超過上限等）印到 stderr，不混進 ranked list。
-  - **拼字建議（T4b，T4c 起改用原字）**：對 `parser.query_words(query, pre)` 的每個原字呼叫 `spelling.did_you_mean(word, reader)`，回傳非空時印出 `Did you mean: ...`，不自動替換。`did_you_mean` 內部的規則（`T4.md` §6.8.3）：
+  - **拼字建議（T4b，T4c 起改用原字）**：對 `parser.query_words(query, pre)` 的每個原字呼叫 `spelling.did_you_mean(word, reader)`，回傳非空時印出 `Did you mean: ...`，不自動替換。`did_you_mean` 內部的規則（`done.T4.md` §6.8.3）：
     - 令 `s = suggest(word, reader)`，`sv = load_surface(reader)`
     - `s` 是空 list 時不觸發
     - `s` 非空，而且原字 df == 0（`sv.df(word) == 0`），或最佳建議的原字 df ≥ 原字 df × 10（`sv.df(s[0]) >= sv.df(word) * 10`）時觸發，回傳前 3 個（`s[:3]`）
@@ -333,27 +338,35 @@ CP 值最高的是 phrase／proximity 和權重方案變體：前者 HW1 的 pos
 
 每個加分項都排在負責任務的核心合併之後，新參數的預設值必須讓核心行為不變；測試放在 `HW2/tests/tN_bonus.test.py`。細節見各任務 plan 的「加分項」一節。
 
-| 優先 | 項目 | 負責任務 | 作業對應 | 做法 | 可重用的 HW1 接口 | 注意 |
-| --- | --- | --- | --- | --- | --- | --- |
-| 1 | Phrase query（`"open source"`） | T4（`Phrase`、`position_match`）；T5 呼叫 | 複雜查詢，Ch.2 | 先 AND 取候選，再比對 positions：各 term 的位置差要等於它們在 query 內的位置差 | `get_postings`（含 positions）、`process` 回傳的 position | stopword 空洞在 index 與 query 都會保留，直接比位置差即可 |
-| 2 | Proximity（`linux /5 kernel`、`e-mail /5 server`） | T4（`Near`、`position_match`）；T5 呼叫 | 複雜查詢，Ch.2 | 兩邊都是 `Phrase`：各自找出位置區間，兩段區間之間的間隔 ≤ k 就命中，不分左右順序 | 同上 | 距離以 index 的位置計算，含 stopword 空洞；重疊不算命中；文件中要說明 |
-| 3 | 權重方案變體（SMART：ltc.ltc、lnc.ltc、bnn 等） | T2（`weight`、`get_norms` 的 scheme）；T6 增加 scheme 參數 | Ch.6 | 把 tf、idf、normalization 三個字母各自實作成函式，以 `--scheme lnc.ltc` 切換 | `weighting.weight()` | doc 端每改一種方案，norm 就要重算一份，檔名帶 scheme（`doc_norms.<scheme>.bin`） |
-| 4 | 多運算子與括號（`(A OR B) AND NOT C`） | T4（T4b）；T5 處理 `Not` | Ch.2–3 | 在同一個遞迴下降 parser 加入 NOT 與括號，優先序 NOT > AND > OR；NOT 以 `set(range(N))` 做集合差 | T4 的 AST、T5 的 merge | 純 `NOT x` 沒有評分 term；純 NOT 的輸出方式由 T6／T7 負責人決定（見「已知限制」） |
-| 5 | Skip pointer 加速 AND | T5 | Ch.2 | T5 直接使用 `intersect_with_skips`，並記錄比較次數對照 `intersect_basic` | `skip_builder.py` `build_skip_list`、`intersect_with_skips` | skip 每次查詢重建，成本 O(df)；要實測確認真的變快才寫進文件 |
-| 6 | Wildcard（`comput*`、`*mon`、`co*tion`） | T4（`Wildcard`、`expand`；T4c 的 `surface.py`） | Ch.3 | T4c：在原字詞彙的 bigram k-gram index 上，用 pattern 的固定片段（含邊界 `$`）取交集篩選候選，再用完整 pattern 做 regex post-filter；比對到的原字轉成 stem 並去重，依 `(-df, stem)` 取前 100 個（超過時警告，訊息含去重後的總數），再以 OR 處理 | `surface.py`（原字詞彙與 k-gram，與拼字共用）；T1 的 `df()` | 只有 `*` 是萬用字元，不支援 `?`、`[...]`；沒有任何 bigram 的 pattern（`*x*`）會掃過全部 644,523 個原字（實測約 81 ms；一般 pattern 2–30 ms，例如 `*mon` 2.3 ms、`*tion*` 12.8 ms、`a*` 30 ms）；`computing*` 會展開成 `comput`。T4b 用的是 `prefix_terms`（bisect），T4c 起不再使用 |
-| 7 | 拼字更正 | T4（`suggest`、`did_you_mean`；T4c 的 `surface.py`）；T7 顯示 | Ch.3 | T4c：原字的 bigram 篩候選（Jaccard ≥ 0.3）→ 排除輸入本身、stopword、與輸入同 stem 的原字 → 依 `(Damerau-OSA, -原字 df, 原字)` 排序 → 依 stem 去重（保留距離最小的原字）；`s` 非空，且原字 df == 0 或最佳建議的原字 df ≥ 原字 df × 10 時顯示前 3 個 | `surface.py`（原字詞彙、原字 df） | 顯示原字（`retreival` → `retrieval`），只顯示「Did you mean」，不自動替換；原字 k-gram 實測建置 0.95 s、32.1 MiB（峰值 33.0 MiB），每個 reader 一次；`did_you_mean` 第一次呼叫（含讀 tsv）約 1.6 s，之後 `suggest` 約 10–45 ms |
-| 8a | 不精確 top-k：champion list | T2（建置，已完成）、T3（`get_champions`）；T6 使用（`champion_r`） | Ch.7 | 每個 df > r 的 term 依 `(-tf, doc)` 預存前 r 名的 doc（預設 r = 50，共 15,755 個 term，建置約 15 s），存成 `champions.r50.{bin,tsv,meta.json}` | T3；meta 核對共用 `IndexReader._check_sources` | 結果會跟精確 cosine 不同，必須是可關閉的選項，預設關閉 |
-| 8b | 不精確 top-k：index elimination | T6 | Ch.7 | 只用 idf 高於門檻的 term | T1 的 `df()` | 同上 |
-| 9 | Web UI 與 term highlighting | T7 | 介面 | Flask／FastAPI 單頁；快速版可用 Streamlit | `doc_map`（URL、TREC ID） | index 沒有存原文與字元 offset，highlight 要回 WARC 重讀文件，成本最高 |
-| 10 | `get_doc_tf` 的 LRU 快取 | T3 | 效率 | `set_doc_tf_cache(maxsize)`，預設關閉 | — | 要量測同一個 query 重跑的加速，回傳複本避免被修改 |
-| 11 | Soundex（`SOUNDEX(robert)`） | T4 | Ch.3 | `soundex()`；T4c：`SOUNDEX(x)` 運算子把同碼的所有原字轉成 stem、去重，依 df 取前 100 個以 OR 擴展；`suggest_soundex()` 回傳同碼原字（依原字 df 排序、依 stem 去重）。只維護一份原字詞彙的對照表，只收純 ASCII 字母的原字 | `surface.py` | Soundex 是為人名設計的，用在一般詞上碰撞很多，會被高 df 的同碼詞主導（`SOUNDEX(robert)` 的第一名是 `report`）；只能當輔助功能 |
+| 優先 | 項目 | 狀態 | 負責任務 | 作業對應 | 做法 | 可重用的 HW1 接口 | 注意 |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| 1 | Phrase query（`"open source"`） | ✅ T4 完成，⏳ 待 T5 呼叫 | T4（`Phrase`、`position_match`）；T5 呼叫 | 複雜查詢，Ch.2 | 先 AND 取候選，再比對 positions：各 term 的位置差要等於它們在 query 內的位置差 | `get_postings`（含 positions）、`process` 回傳的 position | stopword 空洞在 index 與 query 都會保留，直接比位置差即可 |
+| 2 | Proximity（`linux /5 kernel`、`e-mail /5 server`） | ✅ T4 完成，⏳ 待 T5 呼叫 | T4（`Near`、`position_match`）；T5 呼叫 | 複雜查詢，Ch.2 | 兩邊都是 `Phrase`：各自找出位置區間，兩段區間之間的間隔 ≤ k 就命中，不分左右順序 | 同上 | 距離以 index 的位置計算，含 stopword 空洞；重疊不算命中；文件中要說明 |
+| 3 | 權重方案變體（SMART：ltc.ltc、lnc.ltc、bnn 等） | ✅ T2 完成，⏳ 待 T6 整合 | T2（`weight`、`get_norms` 的 scheme）；T6 增加 scheme 參數 | Ch.6 | 把 tf、idf、normalization 三個字母各自實作成函式，以 `--scheme lnc.ltc` 切換 | `weighting.weight()` | doc 端每改一種方案，norm 就要重算一份，檔名帶 scheme（`doc_norms.<scheme>.bin`） |
+| 4 | 多運算子與括號（`(A OR B) AND NOT C`） | ✅ T4 完成，⏳ 待 T5 處理 `Not` | T4（T4b）；T5 處理 `Not` | Ch.2–3 | 在同一個遞迴下降 parser 加入 NOT 與括號，優先序 NOT > AND > OR；NOT 以 `set(range(N))` 做集合差 | T4 的 AST、T5 的 merge | 純 `NOT x` 沒有評分 term；純 NOT 的輸出方式由 T6／T7 負責人決定（見「已知限制」） |
+| 5 | Skip pointer 加速 AND | ⏳ 待開發 | T5 | Ch.2 | T5 直接使用 `intersect_with_skips`，並記錄比較次數對照 `intersect_basic` | `skip_builder.py` `build_skip_list`、`intersect_with_skips` | skip 每次查詢重建，成本 O(df)；要實測確認真的變快才寫進文件 |
+| 6 | Wildcard（`comput*`、`*mon`、`co*tion`） | ✅ 已完成（T4c） | T4（`Wildcard`、`expand`；T4c 的 `surface.py`） | Ch.3 | T4c：在原字詞彙的 bigram k-gram index 上，用 pattern 的固定片段（含邊界 `$`）取交集篩選候選，再用完整 pattern 做 regex post-filter；比對到的原字轉成 stem 並去重，依 `(-df, stem)` 取前 100 個（超過時警告，訊息含去重後的總數），再以 OR 處理 | `surface.py`（原字詞彙與 k-gram，與拼字共用）；T1 的 `df()` | 只有 `*` 是萬用字元，不支援 `?`、`[...]`；沒有任何 bigram 的 pattern（`*x*`）會掃過全部 644,523 個原字（實測約 81 ms；一般 pattern 2–30 ms，例如 `*mon` 2.3 ms、`*tion*` 12.8 ms、`a*` 30 ms）；`computing*` 會展開成 `comput`。T4b 用的是 `prefix_terms`（bisect），T4c 起不再使用 |
+| 7 | 拼字更正 | ✅ T4c 完成，⏳ 待 T7 顯示 | T4（`suggest`、`did_you_mean`；T4c 的 `surface.py`）；T7 顯示 | Ch.3 | T4c：原字的 bigram 篩候選（Jaccard ≥ 0.3）→ 排除輸入本身、stopword、與輸入同 stem 的原字 → 依 `(Damerau-OSA, -原字 df, 原字)` 排序 → 依 stem 去重（保留距離最小的原字）；`s` 非空，且原字 df == 0 或最佳建議的原字 df ≥ 原字 df × 10 時顯示前 3 個 | `surface.py`（原字詞彙、原字 df） | 顯示原字（`retreival` → `retrieval`），只顯示「Did you mean」，不自動替換；原字 k-gram 實測建置 0.95 s、32.1 MiB（峰值 33.0 MiB），每個 reader 一次；`did_you_mean` 第一次呼叫（含讀 tsv）約 1.6 s，之後 `suggest` 約 10–45 ms |
+| 8a | 不精確 top-k：champion list | ✅ T2/T3 完成，⏳ 待 T6 整合 | T2（建置，已完成）、T3（`get_champions`）；T6 使用（`champion_r`） | Ch.7 | 每個 df > r 的 term 依 `(-tf, doc)` 預存前 r 名的 doc（預設 r = 50，共 15,755 個 term，建置約 15 s），存成 `champions.r50.{bin,tsv,meta.json}` | T3；meta 核對共用 `IndexReader._check_sources` | 結果會跟精確 cosine 不同，必須是可關閉的選項，預設關閉 |
+| 8b | 不精確 top-k：index elimination | ⏳ 待開發 | T6 | Ch.7 | 只用 idf 高於門檻的 term | T1 的 `df()` | 同上 |
+| 9 | Web UI 與 term highlighting | ⏳ 待開發（選用） | T7 | 介面 | Flask／FastAPI 單頁；快速版可用 Streamlit | `doc_map`（URL、TREC ID） | index 沒有存原文與字元 offset，highlight 要回 WARC 重讀文件，成本最高 |
+| 10 | `get_doc_tf` 的 LRU 快取 | ✅ 已完成（T3） | T3 | 效率 | `set_doc_tf_cache(maxsize)`，預設關閉 | — | 要量測同一個 query 重跑的加速，回傳複本避免被修改 |
+| 11 | Soundex（`SOUNDEX(robert)`） | ✅ 已完成（T4c） | T4 | Ch.3 | `soundex()`；T4c：`SOUNDEX(x)` 運算子把同碼的所有原字轉成 stem、去重，依 df 取前 100 個以 OR 擴展；`suggest_soundex()` 回傳同碼原字（依原字 df 排序、依 stem 去重）。只維護一份原字詞彙的對照表，只收純 ASCII 字母的原字 | `surface.py` | Soundex 是為人名設計的，用在一般詞上碰撞很多，會被高 df 的同碼詞主導（`SOUNDEX(robert)` 的第一名是 `report`）；只能當輔助功能 |
 
 建議至少做 1–3。第 5 項幾乎不花額外力氣，很適合放進文件的主要特色。
 
 ## 驗證與測試
 
+目前專案已建立並維護 **9 組測試套件（共 3,548 行測試代碼）**，涵蓋 T1～T4 的核心與加分項：
+- `t1.test.py`（27/27）、`t1_bonus.test.py`：IndexReader、df、preprocessor 設定還原、vocabulary、prefix_terms
+- `t2.test.py`、`t2_bonus.test.py`：weighting、build_norms、SMART 方案（ltc, lnc, bnn）、champion list 建置
+- `t3.test.py`、`t3_bonus.test.py`：get_doc_tf 快速跳過 positions、mmap 記憶體切片、get_champions、LRU 快取
+- `t4.test.py`（48/48）、`t4_bonus.test.py`、`t4_surface.test.py`：AST、遞迴下降 parser、phrase / proximity 位置比對、wildcard 展開、拼字建議 did_you_mean、Soundex、原字詞彙層
+
 評分方式是「檢查 ranked list 是否正確」，所以最重要的測試是拿一個完全獨立的暴力版本來對分數。
 
+- [ ] **T5 單元測試**：撰寫 `t5.test.py`，驗證 AND、OR、NOT、Phrase、Near 求值與邊界狀況。
+- [ ] **T6 單元測試**：撰寫 `t6.test.py`，驗證 term-at-a-time 累加、候選文件過濾、cosine 排序、SMART scheme 切換與 champion_r。
 - [ ] **手算小語料**：3～5 篇假文件建成小 index，在 Excel 或紙上算出 cosine，與程式輸出比對到小數點第 6 位。
 - [ ] **暴力對照**：在真實 index 上隨機抽 20 篇文件，從頭掃一遍 postings，算出完整向量與 norm，對照 T2 的 norm 和 T6 的分數。
 - [ ] **前處理一致性**：取 query `information retrieval`、`open source AND Linux`、`e-mail`，確認解析出的 term 是 `inform`、`retriev`、`open`、`sourc`、`linux`、`e`、`mail`，且都存在於 dictionary。
