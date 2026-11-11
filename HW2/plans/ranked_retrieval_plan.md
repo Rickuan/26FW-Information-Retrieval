@@ -17,7 +17,7 @@ sim(d_j, q) = \frac{\sum_{i} w_{i,j} \, w_{i,q}}{\sqrt{\sum_{i} w_{i,j}^2} \; \s
 
 ## 整體架構
 
-檔案配置（T1–T5 已完成，T6–T7 待實作）：
+檔案配置（T1–T6 已完成，T7 待實作）：
 - `weighting.py`、`build_norms.py`、`build_champions.py`：W 權重與 T2 norm、champion 建置（已完成，見 `.done.T2-norms-weighting.md`）
 - `writer.py`：T1、T2、T3 Index 讀取核心（df、N、get_norms、get_doc_tf、get_champions、快取，見 `.done.T1-index-reader.md`–`.done.T3-doc-tf-reader.md`）
 - `tokenizer.py`：T1、T4c 前處理器與 `normalize_token`（見 `.done.T1-index-reader.md`、`.done.T4-query-parser.md`）
@@ -25,13 +25,13 @@ sim(d_j, q) = \frac{\sum_{i} w_{i,j} \, w_{i,q}}{\sqrt{\sum_{i} w_{i,j}^2} \; \s
 - `surface.py`、`build_surface_vocab.py`：T4c 原字詞彙層、k-gram 與 Soundex 分組（見 `.done.T4-query-parser.md`）
 - `skip_builder.py`：T5 引入之 Skip 指標與交集演算法（自包含於 `HW2/src/`，見 `.done.T5-boolean-evaluate.md`）
 - `boolean.py`：T5 Boolean 求值（已完成，見 `.done.T5-boolean-evaluate.md`）
-- `rank.py`：T6 VSM 排序（stub，待實作）
+- `rank.py`：T6 VSM 排序（已完成，見 `.done.T6-vsm-rank.md`）
 - `search.py`：T7 CLI 查詢介面（尚未建立）
 
 ## 必做任務
 
 關鍵路徑：T1 → T3 → T5 → T6 → T7；T2、T4 為旁支。
-**進度：W、T1、T2、T3、T4、T5 皆已完成並通過單元測試，下游 T6–T7 的所有上游接口已全數就緒。**
+**進度：W、T1、T2、T3、T4、T5、T6 皆已完成並通過單元測試，下游 T7 CLI 所有核心接口已全數就緒。**
 
 | 任務 | 對應作業要求 | 狀態 | 盤點缺口 | 直接依賴 | 提供的接口 |
 | --- | --- | --- | --- | --- | --- |
@@ -41,12 +41,12 @@ sim(d_j, q) = \frac{\sum_{i} w_{i,j} \, w_{i,q}}{\sqrt{\sum_{i} w_{i,j}^2} \; \s
 | T3 只取 doc／tf 快速讀取 | 評分效率 | ✅ 已完成（PR #23） | G9 | T1 | `IndexReader.get_doc_tf()` |
 | T4 Query parser | 三種 query 類型 | ✅ 已完成（PR #24） | G5、G6 | T1 | `parse()`、`query_terms()`、`expand()` |
 | T5 Boolean merge | 簡單 Boolean query | ✅ 已完成（PR #26） | — | T3、T4 | `evaluate()` |
-| T6 VSM 排序 | VSM、tf-idf、cosine | ⏳ 待開發（stub） | G8 | W、T1–T5 | `rank()` |
+| T6 VSM 排序 | VSM、tf-idf、cosine | ✅ 已完成 | — | W、T1–T5 | `rank()` |
 | T7 輸出與執行入口 | `<doc#> <score>` 排序輸出 | ⏳ 待開發 | G13 | T6 | `search.py` CLI |
 
 ### 接口定義
 
-T1–T5 接口均已正式實作並通過完整測試，T6 目前為 stub。加分參數均有相容預設值。
+T1–T6 接口均已正式實作並通過完整測試。加分參數均有相容預設值。
 
 ```python
 # W & T2 — weighting.py, build_norms.py, build_champions.py
@@ -89,7 +89,7 @@ def load_surface(reader: IndexReader) -> SurfaceVocab: ...              # 載入
 # T5 — boolean.py（已完成，見 .done.T5-boolean-evaluate.md）
 def evaluate(node: Node, reader: IndexReader) -> set[int] | None: ...   # 根為 Term 回傳 None（不過濾），其餘回傳候選 doc 集合
 
-# T6 — rank.py（待實作）
+# T6 — rank.py（已完成，見 .done.T6-vsm-rank.md）
 def rank(qtf: Counter[str], candidates: set[int] | None, reader: IndexReader,
          scheme: str = "ltc.ltc", champion_r: int | None = None) -> list[tuple[int, float]]: ...  # 依 (-score, doc) 排序
 
@@ -133,7 +133,7 @@ hits  = rank(qtf, cands, reader)      # T6：VSM 計算分數並排序 → T7 �
   - 遞迴求值 AST 產生候選 doc 集合：根節點為 `Term` 回傳 `None`（自由文字不過濾）；`And` 採 df 由小到大兩兩交集（重用 `HW2/src/skip_builder.py` 之 `intersect_with_skips`，保持 HW2 自包含）；`Or` 採線性聯集；`Not` 採全集 `set(range(N))` 做集合差。
   - `Phrase` 與 `Near` 呼叫 `positional.position_match(node, reader)`。
   - 防呆：輸入必須先經 `expand`，遇 `Wildcard` 或 `Soundex` 拋 `ValueError`。
-- **T6 VSM 排序（待實作，`rank.py`）**：
+- **T6 VSM 排序（已完成，見 `.done.T6-vsm-rank.md`）**：
   - Term-at-a-time 累加器：逐評分 term 讀取 `get_doc_tf(t)`，對候選集合內（若為 None 則全部）文件累加 `acc[doc] += w_td * w_tq`。不在 dict 者 df=0 略過。
   - 最終分數 `score = acc[doc] / (norm[doc] * |q|)`，依 `(-score, doc)` 排序（同分 docID 小在前）。
   - 加分：SMART scheme 切換（如 `lnc.ltc`）；`champion_r` 開啟不精確 top-k。
@@ -147,29 +147,30 @@ hits  = rank(qtf, cands, reader)      # T6：VSM 計算分數並排序 → T7 �
 | --- | --- | --- | --- | --- | --- |
 | 1 | Phrase query（`"open source"`） | ✅ 已完成（T4/T5） | T4 / T5 | 先 AND 取候選，再比對 positions（`position_match`） | stopword 空洞保留，比對位置差 |
 | 2 | Proximity（`linux /5 kernel`） | ✅ 已完成（T4/T5） | T4 / T5 | 兩段 Phrase 區間間隔 ≤ k（`position_match`） | 距離以 index 位置計，重疊不算 |
-| 3 | 權重方案變體（SMART） | ✅ T2 完成，⏳ 待 T6 整合 | T2 / T6 | `--scheme lnc.ltc` 切換 tf/idf/norm（`weight`、`get_norms`） | c 方案 norm 檔名帶 scheme |
+| 3 | 權重方案變體（SMART） | ✅ 已完成（T2/T6） | T2 / T6 | `--scheme lnc.ltc` 切換 tf/idf/norm（`weight`、`get_norms`） | c 方案 norm 檔名帶 scheme |
 | 4 | 多運算子與括號 | ✅ 已完成（T4/T5） | T4 / T5 | Parser 支援 NOT 與巢狀括號；NOT 以 `set(range(N))` 做差集 | 純 NOT 無評分詞 |
 | 5 | Skip pointer 加速 AND | ✅ 已完成（T5） | T5 | 使用 `intersect_with_skips`，記錄比較次數對照 basic | skip 每次查詢動態建立 |
 | 6 | Wildcard（`comput*`） | ✅ 已完成（T4c） | T4 | 原字 bigram 篩選 + regex post-filter 展開（`expand`、`surface.py`） | 展開上限 100，依 df 截斷 |
 | 7 | 拼字更正 | ✅ T4c 完成，⏳ 待 T7 顯示 | T4 / T7 | 原字 bigram 篩選 + OSA 距離排序（`did_you_mean`、`spelling.py`） | 依原字 df 差距觸發，僅建議不替換 |
-| 8a | 不精確 top-k：champion list | ✅ T2/T3 完成，⏳ 待 T6 整合 | T2 / T3 / T6 | 預存 df > r 前 r 名（`champions.r50.*`、`get_champions`） | 排序與精確不同，預設關閉 |
-| 8b | 不精確 top-k：index elimination | ⏳ 待開發 | T6 | 僅使用 idf 高於門檻之 term 評分 | 預設關閉 |
+| 8a | 不精確 top-k：champion list | ✅ 已完成（T2/T3/T6） | T2 / T3 / T6 | 預存 df > r 前 r 名（`champions.r50.*`、`get_champions`） | 排序與精確不同，預設關閉 |
+| 8b | 不精確 top-k：index elimination | ⏳ 待開發（獨立優化工項） | 待排定 | 僅使用 idf 高於門檻之 term 評分；T6/T7 完成後獨立開發 | 預設關閉 |
 | 9 | Web UI 與 term highlighting | ⏳ 待開發（選用） | T7 | Flask/FastAPI 或 Streamlit 單頁介面 | highlight 需重讀 WARC，成本較高 |
 | 10 | `get_doc_tf` 的 LRU 快取 | ✅ 已完成（T3） | T3 | `set_doc_tf_cache(maxsize)` | 回傳複本避免修改，預設關閉 |
 | 11 | Soundex（`SOUNDEX(robert)`） | ✅ 已完成（T4c） | T4 | 運算子展開同碼原字；`suggest_soundex` 建議 | 為人名設計，一般詞碰撞多，輔助用 |
 
 ## 驗證與測試
 
-已建置 **11 組單元測試套件（共 4,000+ 行測試代碼）**：
+已建置 **12 組單元測試套件（共 4,500+ 行測試代碼）**：
 - `t1.test.py`（27/27）、`t1_bonus.test.py`：IndexReader、df、preprocessor 設定還原、vocabulary、prefix_terms
 - `t2.test.py`、`t2_bonus.test.py`：weighting、build_norms、SMART 方案（ltc, lnc, bnn）、champions 建置
 - `t3.test.py`、`t3_bonus.test.py`：get_doc_tf 跳過 positions、mmap 切片、get_champions、LRU 快取
 - `t4.test.py`（48/48）、`t4_bonus.test.py`、`t4_surface.test.py`：AST、parser、phrase/proximity、wildcard、拼字建議、Soundex
 - `t5.test.py`（18/18）、`skip_builder.test.py`（4/4）：Boolean 求值引擎、And/Or/Not/Phrase/Near 求值、MockReader、Skip 次數驗證
+- `t6.test.py`（18/18）：VSM 排序引擎、手算對照、同分排序、布林候選過濾、SMART 切換、Champion list、邊界短路
 
 端到端與待開發驗證清單：
 - [x] **T5 單元測試**：撰寫 `t5.test.py` 與 `skip_builder.test.py`，驗證 AND、OR、NOT、Phrase、Near 求值與邊界狀況。
-- [ ] **T6 單元測試**：撰寫 `t6.test.py`，驗證 term-at-a-time 累加、候選文件過濾、cosine 排序、SMART scheme 切換與 champion_r。
+- [x] **T6 單元測試**：撰寫 `t6.test.py`，驗證 term-at-a-time 累加、候選文件過濾、cosine 排序、SMART scheme 切換與 champion_r。
 - [ ] **手算小語料**：3～5 篇假文件建成小 index，在紙上或試算表算出 cosine，對照輸出至小數第 6 位。
 - [ ] **暴力對照**：隨機抽 20 篇真實文件全掃 postings 算完整向量，對照 T2 norm 與 T6 分數。
 - [ ] **前處理一致性**：確認解析詞彙（`inform`、`retriev`、`open`、`sourc`、`linux`、`e`、`mail`）皆存於 dictionary。
@@ -212,6 +213,10 @@ hits  = rank(qtf, cands, reader)      # T6：VSM 計算分數並排序 → T7 �
   - *決策依據*：`Preprocessor.from_config` 若缺少設定直接拋 `ValueError`，禁止悄悄套用預設值，徹底避免 query 端前處理與 index 不一致卻未報錯的隱蔽 bug。
 - **Boolean 過濾與評分計算分離**：
   - *決策依據*：HW1 的 query 將中間結果包成假 posting 導致 tf 遺失；HW2 決定評分時保留 query 所有 term 的真實 qtf，Boolean 只單純負責產出候選 docID 集合供 VSM 過濾。
+- **純 NOT 查詢與評分短路**：
+  - *決策依據*：純 NOT 查詢無 query 評分詞（`qtf` 為空），依向量空間模型無查詢向量可供比對，T6 直接回傳空結果 `[]`，符合現代搜尋引擎語意與 VSM 數學定義。
+- **T6 排序與 T7 top-k 職責分離**：
+  - *決策依據*：`rank()` 專注於正確計算與破同分排序（依原始雙精度 float 與 docID 升冪），回傳所有 `score > 0` 的完整排序候選清單；Top-k 截斷與 6 位小數展示格式化一律交由下游 T7 CLI 處理，維持演算法核心的純粹性。
 
 ### 3. 已知限制
 
@@ -222,6 +227,6 @@ hits  = rank(qtf, cands, reader)      # T6：VSM 計算分數並排序 → T7 �
 
 ### 4. 待確認事項
 
-- [ ] 純 `NOT x` 的 query：無評分詞時的輸出規範（由 T6/T7 決定回傳空結果、依 docID 列出並給 0 分、或特殊提示）。
-- [ ] 輸出是否要截斷 top-k（預設全印分數 > 0 文件，TA 需求待釐清）。
+- [x] 純 `NOT x` 的 query：無評分詞時依 VSM 定義無 query 向量，T6 直接回傳空結果 `[]`，T7 不輸出文件。
+- [x] 輸出是否要截斷 top-k：T6 專注計算並回傳所有 `score > 0` 的排序清單；由 T7 CLI 接收 `--top-k` 參數進行截斷（預設輸出全量 score > 0）。
 - [ ] zip 是否附 index 與 `doc_norms*.bin`、`champions.*`。
