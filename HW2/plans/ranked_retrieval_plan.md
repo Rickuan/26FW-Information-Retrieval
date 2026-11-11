@@ -153,7 +153,7 @@ hits  = rank(qtf, cands, reader)      # T6：VSM 計算分數並排序 → T7 �
 | 6 | Wildcard（`comput*`） | ✅ 已完成（T4c） | T4 | 原字 bigram 篩選 + regex post-filter 展開（`expand`、`surface.py`） | 展開上限 100，依 df 截斷 |
 | 7 | 拼字更正 | ✅ T4c 完成，⏳ 待 T7 顯示 | T4 / T7 | 原字 bigram 篩選 + OSA 距離排序（`did_you_mean`、`spelling.py`） | 依原字 df 差距觸發，僅建議不替換 |
 | 8a | 不精確 top-k：champion list | ✅ T2/T3 完成，⏳ 待 T6 整合 | T2 / T3 / T6 | 預存 df > r 前 r 名（`champions.r50.*`、`get_champions`） | 排序與精確不同，預設關閉 |
-| 8b | 不精確 top-k：index elimination | ⏳ 待開發 | T6 | 僅使用 idf 高於門檻之 term 評分 | 預設關閉 |
+| 8b | 不精確 top-k：index elimination | ⏳ 待開發（獨立優化工項） | 待排定 | 僅使用 idf 高於門檻之 term 評分；T6/T7 完成後獨立開發 | 預設關閉 |
 | 9 | Web UI 與 term highlighting | ⏳ 待開發（選用） | T7 | Flask/FastAPI 或 Streamlit 單頁介面 | highlight 需重讀 WARC，成本較高 |
 | 10 | `get_doc_tf` 的 LRU 快取 | ✅ 已完成（T3） | T3 | `set_doc_tf_cache(maxsize)` | 回傳複本避免修改，預設關閉 |
 | 11 | Soundex（`SOUNDEX(robert)`） | ✅ 已完成（T4c） | T4 | 運算子展開同碼原字；`suggest_soundex` 建議 | 為人名設計，一般詞碰撞多，輔助用 |
@@ -212,6 +212,10 @@ hits  = rank(qtf, cands, reader)      # T6：VSM 計算分數並排序 → T7 �
   - *決策依據*：`Preprocessor.from_config` 若缺少設定直接拋 `ValueError`，禁止悄悄套用預設值，徹底避免 query 端前處理與 index 不一致卻未報錯的隱蔽 bug。
 - **Boolean 過濾與評分計算分離**：
   - *決策依據*：HW1 的 query 將中間結果包成假 posting 導致 tf 遺失；HW2 決定評分時保留 query 所有 term 的真實 qtf，Boolean 只單純負責產出候選 docID 集合供 VSM 過濾。
+- **純 NOT 查詢與評分短路**：
+  - *決策依據*：純 NOT 查詢無 query 評分詞（`qtf` 為空），依向量空間模型無查詢向量可供比對，T6 直接回傳空結果 `[]`，符合現代搜尋引擎語意與 VSM 數學定義。
+- **T6 排序與 T7 top-k 職責分離**：
+  - *決策依據*：`rank()` 專注於正確計算與破同分排序（依原始雙精度 float 與 docID 升冪），回傳所有 `score > 0` 的完整排序候選清單；Top-k 截斷與 6 位小數展示格式化一律交由下游 T7 CLI 處理，維持演算法核心的純粹性。
 
 ### 3. 已知限制
 
@@ -222,6 +226,6 @@ hits  = rank(qtf, cands, reader)      # T6：VSM 計算分數並排序 → T7 �
 
 ### 4. 待確認事項
 
-- [ ] 純 `NOT x` 的 query：無評分詞時的輸出規範（由 T6/T7 決定回傳空結果、依 docID 列出並給 0 分、或特殊提示）。
-- [ ] 輸出是否要截斷 top-k（預設全印分數 > 0 文件，TA 需求待釐清）。
+- [x] 純 `NOT x` 的 query：無評分詞時依 VSM 定義無 query 向量，T6 直接回傳空結果 `[]`，T7 不輸出文件。
+- [x] 輸出是否要截斷 top-k：T6 專注計算並回傳所有 `score > 0` 的排序清單；由 T7 CLI 接收 `--top-k` 參數進行截斷（預設輸出全量 score > 0）。
 - [ ] zip 是否附 index 與 `doc_norms*.bin`、`champions.*`。
