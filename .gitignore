@@ -236,6 +236,9 @@ spimi_test_tmp/
 
 # Output directories
 output/
+**/output/
+outputs/
+**/outputs/
 
 dataset/
 

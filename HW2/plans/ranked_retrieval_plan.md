@@ -173,7 +173,7 @@ hits  = rank(qtf, cands, reader)      # T6：VSM 計算分數並排序 → T7 �
 - [x] **T5 單元測試**：撰寫 `t5.test.py` 與 `skip_builder.test.py`，驗證 AND、OR、NOT、Phrase、Near 求值與邊界狀況。
 - [x] **T6 單元測試**：撰寫 `t6.test.py`，驗證 term-at-a-time 累加、候選文件過濾、cosine 排序、SMART scheme 切換與 champion_r。
 - [x] **T7 單元與 CLI 測試**：撰寫 `t7.test.py`，驗證 CLI 入口、標準輸出格式、參數防呆、拼字建議與子行程。
-- [x] **作業範例 query**：`Microsoft`、`United States government`、`open source AND Linux`、`software engineer OR project manager` 輸出至 outputs。
+- [x] **作業範例 query**：`Microsoft`、`United States government`、`open source AND Linux`、`software engineer OR project manager` 輸出至 `HW2/output/`（本地生成不入版控）。
 - [ ] **手算小語料**：3～5 篇假文件建成小 index，在紙上或試算表算出 cosine，對照輸出至小數第 6 位。
 - [ ] **暴力對照**：隨機抽 20 篇真實文件全掃 postings 算完整向量，對照 T2 norm 與 T6 分數。
 - [ ] **前處理一致性**：確認解析詞彙（`inform`、`retriev`、`open`、`sourc`、`linux`、`e`、`mail`）皆存於 dictionary。
@@ -186,7 +186,7 @@ hits  = rank(qtf, cands, reader)      # T6：VSM 計算分數並排序 → T7 �
 **`<學號>_HW2.zip` 內容**：
 - [x] 原始碼：`HW2/src/`（含 search.py）
 - [ ] 設定檔：`pyproject.toml`、`uv.lock`
-- [x] 輸出結果：範例 query 的 ranked list（`outputs/*.txt`）
+- [x] 輸出結果：範例 query 的 ranked list（本地 `output/*.txt`，不入版控，打包至 release zip）
 - [ ] 一頁文件：主要特色、遇到的困難、執行環境需求、成員與分工
 - [ ] 附上 `HW2/index/surface_vocab.tsv` 與 `surface_vocab.meta.json`（T4c，TA 無未 stem index 無法重建）
 - [ ] 決定是否附 index 與 `doc_norms*.bin`、`champions.*`（不附則 README 需附重建指令：norms 16s、champions 15s）
