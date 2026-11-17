@@ -17,6 +17,8 @@ from spelling import did_you_mean
 from tokenizer import Preprocessor
 from writer import IndexReader
 
+FEW_RESULTS_THRESHOLD = 20
+
 
 def search_query(
     query: str,
@@ -64,6 +66,25 @@ def format_hits(hits: list[tuple[int, float]]) -> str:
     if not hits:
         return ""
     return "\n".join(f"{doc} {score:.6f}" for doc, score in hits)
+
+
+def suggest_spelling_corrections(
+    query: str,
+    reader: IndexReader,
+    pre: Preprocessor,
+    show: int = 3,
+) -> list[tuple[str, list[str]]]:
+    """檢驗 query 中的原詞，若有拼字更正建議則回傳 [(word, [suggestions...]), ...]"""
+    suggestions: list[tuple[str, list[str]]] = []
+    try:
+        words = query_words(query, pre)
+    except Exception:
+        return []
+    for w in words:
+        s = did_you_mean(w, reader, show=show)
+        if s:
+            suggestions.append((w, s))
+    return suggestions
 
 
 def build_arg_parser() -> argparse.ArgumentParser:
@@ -164,6 +185,10 @@ def main(argv: list[str] | None = None) -> int:
             sys.stderr.write(f"Query error: {e}\n")
             return 1
 
+        if len(hits) < FEW_RESULTS_THRESHOLD:
+            for word, suggs in suggest_spelling_corrections(args.query, reader, pre):
+                sys.stderr.write(f"Did you mean for '{word}': {', '.join(suggs)}?\n")
+
         formatted = format_hits(hits)
         if args.output:
             out_file = Path(args.output)
@@ -200,6 +225,10 @@ def main(argv: list[str] | None = None) -> int:
         except ValueError as e:
             sys.stderr.write(f"Query error on line {idx} ({q!r}): {e}\n")
             return 1
+
+        if len(hits) < FEW_RESULTS_THRESHOLD:
+            for word, suggs in suggest_spelling_corrections(q, reader, pre):
+                sys.stderr.write(f"Did you mean for '{word}': {', '.join(suggs)}?\n")
 
         formatted = format_hits(hits)
         if args.output_dir:

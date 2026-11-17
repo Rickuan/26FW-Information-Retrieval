@@ -16,7 +16,13 @@ SRC = ROOT / "src"
 INDEX = ROOT / "index"
 sys.path.insert(0, str(SRC))
 
-from search import build_arg_parser, format_hits, main as search_main, search_query
+from search import (
+    build_arg_parser,
+    format_hits,
+    main as search_main,
+    search_query,
+    suggest_spelling_corrections,
+)
 from tokenizer import Preprocessor
 from writer import IndexReader
 
@@ -167,10 +173,33 @@ def main() -> int:
     ))
 
     print("\n" + "=" * 60)
+    print("T7 拼字建議與錯誤處理 (Step 7.4) 測試")
+    print("=" * 60)
+
+    total += 1
+    passed += run("suggest_spelling_corrections 正確詞項回傳 []", lambda: (
+        suggest_spelling_corrections("Microsoft", reader, pre) == [],
+        "正確單詞無建議"
+    ))
+
+    total += 1
+    passed += run("suggest_spelling_corrections 錯字回傳原字建議", lambda: (
+        len(suggs := suggest_spelling_corrections("retreival", reader, pre)) == 1 and
+        suggs[0][0] == "retreival" and
+        "retrieval" in suggs[0][1],
+        f"retreival -> {suggs[0][1]}"
+    ))
+
+    total += 1
+    passed += run("CLI 錯字查詢觸發 stderr 拼字建議且 stdout 為空", lambda: (
+        _test_cli_spelling_stderr()
+    ))
+
+    print("\n" + "=" * 60)
     print(f"Test Summary: {passed}/{total} passed")
     print("=" * 60)
     if passed == total:
-        print("\n✔ ALL STEP 7.2 & 7.3 TESTS PASSED!\n")
+        print("\n✔ ALL TESTS PASSED!\n")
         return 0
     else:
         print("\n❌ SOME TESTS FAILED!\n")
@@ -257,6 +286,34 @@ def _test_cli_batch_queries() -> tuple[bool, str]:
         if len(q4_lines) != 3:
             return False, f"q4 expected 3 lines, got {len(q4_lines)}"
         return True, f"batch files generated successfully (q1={len(q1_lines)}, q3=empty, q4={len(q4_lines)})"
+
+
+def _test_cli_spelling_stderr() -> tuple[bool, str]:
+    # 測試 1: 0 命中詞 computtr -> stdout 為空，stderr 提示建議
+    buf_out = io.StringIO()
+    buf_err = io.StringIO()
+    with redirect_stdout(buf_out), redirect_stderr(buf_err):
+        ret = search_main(["--index-dir", str(INDEX), "computtr"])
+    if ret != 0:
+        return False, f"expected ret=0, got {ret}"
+    if buf_out.getvalue().strip() != "":
+        return False, f"expected empty stdout for computtr, got {buf_out.getvalue()!r}"
+    if "Did you mean for 'computtr':" not in buf_err.getvalue() or "computer" not in buf_err.getvalue():
+        return False, f"expected suggestion for computtr in stderr, got {buf_err.getvalue()!r}"
+
+    # 測試 2: 罕見錯字 retreival (< 20 命中) -> stdout 有 11 筆，stderr 仍提供建議
+    buf_out2 = io.StringIO()
+    buf_err2 = io.StringIO()
+    with redirect_stdout(buf_out2), redirect_stderr(buf_err2):
+        ret2 = search_main(["--index-dir", str(INDEX), "retreival"])
+    if ret2 != 0:
+        return False, f"expected ret2=0, got {ret2}"
+    if len(buf_out2.getvalue().strip().splitlines()) != 11:
+        return False, f"expected 11 results for retreival, got {len(buf_out2.getvalue().strip().splitlines())}"
+    if "Did you mean for 'retreival':" not in buf_err2.getvalue() or "retrieval" not in buf_err2.getvalue():
+        return False, f"expected suggestion for retreival in stderr, got {buf_err2.getvalue()!r}"
+
+    return True, "0 命中 (computtr) 與罕見錯字 (retreival) 皆正確觸發 stderr 建議"
 
 
 if __name__ == "__main__":
