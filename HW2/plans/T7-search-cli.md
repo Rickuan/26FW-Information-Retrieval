@@ -69,5 +69,5 @@ uv run python HW2/src/search.py --index-dir HW2/index [--top-k K] [--queries FIL
 - [x] **7.3 CLI 介面與參數解析**：實作 `HW2/src/search.py` 之 `main()` 與 argparse 設定。
 - [x] **7.4 拼字建議整合與防呆**：整合 stderr 拼字建議與語法/缺檔例外處理。
 - [x] **7.5 單元與端到端測試**：撰寫 `HW2/tests/t7.test.py`，覆蓋所有 CLI 參數、輸出格式與邊界。
-- [ ] **7.6 範例 Query 產出**：執行 4 組作業範例 query，輸出至 `HW2/outputs/*.txt`。
+- [x] **7.6 範例 Query 產出**：執行 4 組作業範例 query，輸出至 `HW2/outputs/*.txt`。
 - [ ] **7.7 驗收與歸檔**：同步更新 `ranked_retrieval_plan.md`，並將規劃檔歸檔為 `.done.T7-search-cli.md`。
