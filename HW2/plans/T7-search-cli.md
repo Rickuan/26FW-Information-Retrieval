@@ -64,8 +64,8 @@ uv run python HW2/src/search.py --index-dir HW2/index [--top-k K] [--queries FIL
   - 驗證 `--scheme` 與 `--champion-r` 參數正確透傳至 T6。
 
 ## 5. 子工項與進度追蹤
-- [ ] **7.1 規劃建檔與分支切換**：建立 `HW2/plans/T7-search-cli.md`，確認依賴接口。
-- [ ] **7.2 核心查詢函式實作**：實作 `search_query()` 端到端整合查詢管線。
+- [x] **7.1 規劃建檔與分支切換**：建立 `HW2/plans/T7-search-cli.md`，確認依賴接口。
+- [x] **7.2 核心查詢函式實作**：實作 `search_query()` 端到端整合查詢管線。
 - [ ] **7.3 CLI 介面與參數解析**：實作 `HW2/src/search.py` 之 `main()` 與 argparse 設定。
 - [ ] **7.4 拼字建議整合與防呆**：整合 stderr 拼字建議與語法/缺檔例外處理。
 - [ ] **7.5 單元與端到端測試**：撰寫 `HW2/tests/t7.test.py`，覆蓋所有 CLI 參數、輸出格式與邊界。
