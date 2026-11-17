@@ -196,6 +196,25 @@ def main() -> int:
     ))
 
     print("\n" + "=" * 60)
+    print("T7 整合端到端與子行程 (Step 7.5) 測試")
+    print("=" * 60)
+
+    total += 1
+    passed += run("CLI 參數防呆: 缺少 query 與 --queries 拋出 SystemExit", lambda: (
+        _test_cli_missing_args()
+    ))
+
+    total += 1
+    passed += run("CLI 參數防呆: 同時提供 query 與 --queries 拋出 SystemExit", lambda: (
+        _test_cli_conflicting_args()
+    ))
+
+    total += 1
+    passed += run("CLI 獨立 Subprocess 行程執行驗證", lambda: (
+        _test_subprocess_cli()
+    ))
+
+    print("\n" + "=" * 60)
     print(f"Test Summary: {passed}/{total} passed")
     print("=" * 60)
     if passed == total:
@@ -314,6 +333,48 @@ def _test_cli_spelling_stderr() -> tuple[bool, str]:
         return False, f"expected suggestion for retreival in stderr, got {buf_err2.getvalue()!r}"
 
     return True, "0 命中 (computtr) 與罕見錯字 (retreival) 皆正確觸發 stderr 建議"
+
+
+def _test_cli_missing_args() -> tuple[bool, str]:
+    buf = io.StringIO()
+    with redirect_stderr(buf):
+        try:
+            search_main(["--index-dir", str(INDEX)])
+            return False, "did not exit when arguments missing"
+        except SystemExit as e:
+            if e.code == 0:
+                return False, "exit code was 0 instead of non-zero"
+    return True, "缺少參數正確引發 SystemExit(2)"
+
+
+def _test_cli_conflicting_args() -> tuple[bool, str]:
+    buf = io.StringIO()
+    with redirect_stderr(buf):
+        try:
+            search_main(["--index-dir", str(INDEX), "--queries", "fake.txt", "Microsoft"])
+            return False, "did not exit when conflicting arguments provided"
+        except SystemExit as e:
+            if e.code == 0:
+                return False, "exit code was 0 instead of non-zero"
+    return True, "衝突參數正確引發 SystemExit(2)"
+
+
+def _test_subprocess_cli() -> tuple[bool, str]:
+    import subprocess
+    cmd = [
+        sys.executable,
+        str(SRC / "search.py"),
+        "--index-dir", str(INDEX),
+        "--top-k", "2",
+        "Microsoft",
+    ]
+    res = subprocess.run(cmd, capture_output=True, text=True)
+    if res.returncode != 0:
+        return False, f"returncode {res.returncode}, stderr: {res.stderr}"
+    lines = res.stdout.strip().splitlines()
+    if len(lines) != 2:
+        return False, f"expected 2 lines, got {len(lines)}"
+    return True, f"subprocess exit 0, output: {lines}"
 
 
 if __name__ == "__main__":
