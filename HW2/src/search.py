@@ -57,3 +57,160 @@ def search_query(
     if top_k is not None:
         hits = hits[:top_k]
     return hits
+
+
+def format_hits(hits: list[tuple[int, float]]) -> str:
+    """將檢索結果格式化為每行 '<doc#> <score:.6f>' 字串。"""
+    if not hits:
+        return ""
+    return "\n".join(f"{doc} {score:.6f}" for doc, score in hits)
+
+
+def build_arg_parser() -> argparse.ArgumentParser:
+    """建構 CLI 命令列參數解析器。"""
+    parser = argparse.ArgumentParser(
+        prog="search.py",
+        description="IR HW2 Ranked Retrieval CLI Search Interface",
+    )
+    parser.add_argument(
+        "query",
+        nargs="?",
+        default=None,
+        help="單一檢索查詢字串",
+    )
+    parser.add_argument(
+        "--index-dir",
+        default="HW2/index",
+        help="索引目錄路徑（預設：HW2/index）",
+    )
+    parser.add_argument(
+        "--top-k",
+        type=int,
+        default=None,
+        help="截斷回傳排名前 K 筆結果（預設輸出所有 score > 0）",
+    )
+    parser.add_argument(
+        "--queries",
+        type=str,
+        default=None,
+        help="批次查詢檔案路徑（每行一個 query）",
+    )
+    parser.add_argument(
+        "--scheme",
+        default="ltc.ltc",
+        help="SMART 權重方案（預設：ltc.ltc）",
+    )
+    parser.add_argument(
+        "--champion-r",
+        type=int,
+        default=None,
+        help="不精確 top-k Champion list r 大小（預設關閉）",
+    )
+    parser.add_argument(
+        "-o",
+        "--output",
+        type=str,
+        default=None,
+        help="單一查詢之輸出結果檔案路徑（預設輸出至 stdout）",
+    )
+    parser.add_argument(
+        "--output-dir",
+        type=str,
+        default=None,
+        help="批次查詢輸出目錄路徑（搭配 --queries，每筆查詢寫入獨立檔案）",
+    )
+    return parser
+
+
+def main(argv: list[str] | None = None) -> int:
+    """CLI 主程式入口。"""
+    parser = build_arg_parser()
+    args = parser.parse_args(argv)
+
+    if args.query is None and args.queries is None:
+        parser.error("must provide either 'query' or '--queries'")
+    if args.query is not None and args.queries is not None:
+        parser.error("cannot specify both 'query' and '--queries'")
+
+    if args.top_k is not None and args.top_k < 1:
+        parser.error("--top-k must be a positive integer")
+    if args.champion_r is not None and args.champion_r < 1:
+        parser.error("--champion-r must be a positive integer")
+
+    index_path = Path(args.index_dir)
+    if not index_path.is_dir():
+        sys.stderr.write(f"Error: index directory not found: {index_path}\n")
+        return 1
+
+    try:
+        reader = IndexReader(str(index_path))
+        meta = reader.get_metadata()
+        pre = Preprocessor.from_config(meta["preprocessor"])
+    except Exception as e:
+        sys.stderr.write(f"Error initializing index: {e}\n")
+        return 1
+
+    if args.query is not None:
+        try:
+            hits = search_query(
+                args.query,
+                reader,
+                pre,
+                scheme=args.scheme,
+                champion_r=args.champion_r,
+                top_k=args.top_k,
+            )
+        except ValueError as e:
+            sys.stderr.write(f"Query error: {e}\n")
+            return 1
+
+        formatted = format_hits(hits)
+        if args.output:
+            out_file = Path(args.output)
+            out_file.parent.mkdir(parents=True, exist_ok=True)
+            out_file.write_text(formatted + ("\n" if formatted else ""), encoding="utf-8")
+        else:
+            if formatted:
+                print(formatted)
+        return 0
+
+    queries_file = Path(args.queries)
+    if not queries_file.is_file():
+        sys.stderr.write(f"Error: queries file not found: {queries_file}\n")
+        return 1
+
+    lines = queries_file.read_text(encoding="utf-8").splitlines()
+    if args.output_dir:
+        out_dir = Path(args.output_dir)
+        out_dir.mkdir(parents=True, exist_ok=True)
+
+    for idx, raw_line in enumerate(lines, 1):
+        q = raw_line.strip()
+        if not q:
+            continue
+        try:
+            hits = search_query(
+                q,
+                reader,
+                pre,
+                scheme=args.scheme,
+                champion_r=args.champion_r,
+                top_k=args.top_k,
+            )
+        except ValueError as e:
+            sys.stderr.write(f"Query error on line {idx} ({q!r}): {e}\n")
+            return 1
+
+        formatted = format_hits(hits)
+        if args.output_dir:
+            out_path = Path(args.output_dir) / f"query_{idx}.txt"
+            out_path.write_text(formatted + ("\n" if formatted else ""), encoding="utf-8")
+        else:
+            if formatted:
+                print(formatted)
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
+

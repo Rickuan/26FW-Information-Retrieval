@@ -5,7 +5,10 @@
 """
 from __future__ import annotations
 
+import io
 import sys
+import tempfile
+from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -13,7 +16,7 @@ SRC = ROOT / "src"
 INDEX = ROOT / "index"
 sys.path.insert(0, str(SRC))
 
-from search import search_query
+from search import build_arg_parser, format_hits, main as search_main, search_query
 from tokenizer import Preprocessor
 from writer import IndexReader
 
@@ -119,10 +122,55 @@ def main() -> int:
     ))
 
     print("\n" + "=" * 60)
+    print("T7 CLI 介面與格式化輸出 (Step 7.3) 測試")
+    print("=" * 60)
+
+    # 6. format_hits 格式化
+    total += 1
+    passed += run("format_hits 空清單回傳空字串", lambda: (
+        format_hits([]) == "",
+        "format_hits([]) == ''"
+    ))
+
+    total += 1
+    passed += run("format_hits 精準 6 位小數", lambda: (
+        format_hits([(123, 0.5), (456, 0.12345678)]) == "123 0.500000\n456 0.123457",
+        "format_hits 包含四捨五入與空白分隔"
+    ))
+
+    # 7. CLI main 執行與輸出捕獲
+    total += 1
+    passed += run("CLI main 單一查詢 stdout 輸出", lambda: (
+        _test_cli_single(reader)
+    ))
+
+    total += 1
+    passed += run("CLI main 寫入 -o 輸出檔", lambda: (
+        _test_cli_output_file()
+    ))
+
+    total += 1
+    passed += run("CLI main 批次 --queries 查詢", lambda: (
+        _test_cli_batch_queries()
+    ))
+
+    total += 1
+    passed += run("CLI main 非法索引目錄回傳 exit 1", lambda: (
+        search_main(["--index-dir", "nonexistent_dir_xyz", "test"]) == 1,
+        "nonexistent index dir returned 1"
+    ))
+
+    total += 1
+    passed += run("CLI main 語法錯誤回傳 exit 1", lambda: (
+        search_main(["--index-dir", str(INDEX), '"unclosed quote']) == 1,
+        "syntax error returned 1"
+    ))
+
+    print("\n" + "=" * 60)
     print(f"Test Summary: {passed}/{total} passed")
     print("=" * 60)
     if passed == total:
-        print("\n✔ ALL STEP 7.2 TESTS PASSED!\n")
+        print("\n✔ ALL STEP 7.2 & 7.3 TESTS PASSED!\n")
         return 0
     else:
         print("\n❌ SOME TESTS FAILED!\n")
@@ -145,6 +193,70 @@ def _test_syntax_error(reader: IndexReader, pre: Preprocessor) -> tuple[bool, st
         return False, "Unclosed quote did not raise ValueError"
     except ValueError:
         return True, "未配對引號正確拋出 ValueError"
+
+
+def _test_cli_single(reader: IndexReader) -> tuple[bool, str]:
+    buf = io.StringIO()
+    with redirect_stdout(buf):
+        ret = search_main(["--index-dir", str(INDEX), "--top-k", "3", "Microsoft"])
+    out = buf.getvalue().strip().splitlines()
+    if ret != 0:
+        return False, f"main() returned {ret}"
+    if len(out) != 3:
+        return False, f"expected 3 lines, got {len(out)}"
+    first_doc, first_score = out[0].split()
+    if first_doc != "28281" or float(first_score) <= 0:
+        return False, f"unexpected first line: {out[0]}"
+    return True, f"stdout output {len(out)} lines, top-1={out[0]}"
+
+
+def _test_cli_output_file() -> tuple[bool, str]:
+    with tempfile.TemporaryDirectory() as tmpdir:
+        out_path = Path(tmpdir) / "sub" / "result.txt"
+        ret = search_main(["--index-dir", str(INDEX), "--top-k", "2", "-o", str(out_path), "Microsoft"])
+        if ret != 0:
+            return False, f"main() returned {ret}"
+        if not out_path.is_file():
+            return False, "output file was not created"
+        lines = out_path.read_text(encoding="utf-8").strip().splitlines()
+        if len(lines) != 2:
+            return False, f"expected 2 lines in file, got {len(lines)}"
+        return True, f"file created with {len(lines)} lines"
+
+
+def _test_cli_batch_queries() -> tuple[bool, str]:
+    with tempfile.TemporaryDirectory() as tmpdir:
+        q_file = Path(tmpdir) / "queries.txt"
+        q_file.write_text("Microsoft\n\nNOT linux\nopen source AND Linux\n", encoding="utf-8")
+        out_dir = Path(tmpdir) / "out_queries"
+
+        ret = search_main([
+            "--index-dir", str(INDEX),
+            "--top-k", "3",
+            "--queries", str(q_file),
+            "--output-dir", str(out_dir),
+        ])
+        if ret != 0:
+            return False, f"main() returned {ret}"
+
+        # 應產生 query_1.txt, query_3.txt, query_4.txt (query 2 是空行跳過)
+        q1 = out_dir / "query_1.txt"
+        q3 = out_dir / "query_3.txt"
+        q4 = out_dir / "query_4.txt"
+        if not q1.is_file() or not q3.is_file() or not q4.is_file():
+            return False, "one or more batch query files missing"
+
+        q1_lines = q1.read_text(encoding="utf-8").strip().splitlines()
+        q3_lines = q3.read_text(encoding="utf-8").strip()  # NOT linux 應為空
+        q4_lines = q4.read_text(encoding="utf-8").strip().splitlines()
+
+        if len(q1_lines) != 3:
+            return False, f"q1 expected 3 lines, got {len(q1_lines)}"
+        if q3_lines != "":
+            return False, f"q3 expected empty, got {q3_lines!r}"
+        if len(q4_lines) != 3:
+            return False, f"q4 expected 3 lines, got {len(q4_lines)}"
+        return True, f"batch files generated successfully (q1={len(q1_lines)}, q3=empty, q4={len(q4_lines)})"
 
 
 if __name__ == "__main__":
