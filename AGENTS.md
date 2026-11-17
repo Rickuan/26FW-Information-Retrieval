@@ -126,6 +126,19 @@
 
 ---
 
+## 7. 輸出產物與構件管理規範
+
+1. **輸出目錄統一單數型命名 (`output/`)**：
+   - 專案、模組或各作業之執行產物、查詢結果或中介檔案目錄，一律強制命名為單數型的 `output/`（嚴禁使用複數型 `outputs/`、`results/` 等）。
+2. **嚴格禁止生成產物上傳版控**：
+   - 任何執行或編譯產物（如檢索結果 `.txt`、暫存檔、中介索引檔等衍生狀態）一律嚴格禁止 `git add` 或 commit 至版控中。
+   - 所有 `output/` 目錄必須透過 `.gitignore` 嚴格排除。
+3. **作業打包與發布交付機制 (Git Release)**：
+   - 作業交付時，由本機腳本依作業規格打包為 `.zip`。
+   - 程式庫發布或交付成果時，應以 GitHub Release（Git Release）的方式作為附件（Release Assets）提供下載，嚴禁直接提交進 git tree。
+
+---
+
 # Part II: 本專案專屬規範
 
 > 專案名稱：26FW Information Retrieval (`26FW-Information-Retrieval`)  
