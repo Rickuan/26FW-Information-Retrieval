@@ -78,20 +78,28 @@ def main() -> int:
         "search_query('nonexistentwordxyz123') == []"
     ))
 
+    def _is_sorted(hits):
+        for i in range(len(hits) - 1):
+            r_curr = round(hits[i][1], 6)
+            r_next = round(hits[i + 1][1], 6)
+            if r_curr < r_next or (r_curr == r_next and hits[i][0] >= hits[i + 1][0]):
+                return False
+        return True
+
     # 2. 正常查詢與排序
     total += 1
     passed += run("真實索引: 'Microsoft' 排序與分數健全性", lambda: (
         len(hits := search_query("Microsoft", reader, pre)) > 2000 and
         hits[0][0] == 28281 and
         0 < hits[0][1] <= 1.0 and
-        all(hits[i][1] >= hits[i + 1][1] for i in range(len(hits) - 1)),
+        _is_sorted(hits),
         f"命中 {len(hits)} 篇，top-1 doc={hits[0][0]}, score={hits[0][1]:.6f}"
     ))
 
     total += 1
     passed += run("複合查詢: 'open source AND Linux'", lambda: (
         len(hits := search_query("open source AND Linux", reader, pre)) == 294 and
-        all(hits[i][1] >= hits[i + 1][1] for i in range(len(hits) - 1)),
+        _is_sorted(hits),
         f"命中 {len(hits)} 篇，top-1 doc={hits[0][0]}, score={hits[0][1]:.6f}"
     ))
 

@@ -221,6 +221,25 @@ def main() -> None:
     if run("同分文件嚴格依 doc_num 升冪排序", test_tie_breaking_order):
         total_passed += 1
 
+    def test_rounded_precision_tie_breaking():
+        # doc 2 分數為 0.12345600001，doc 1 分數為 0.12345599999
+        # 四捨五入至 6 位小數皆為 0.123456，同分時 doc 1 必須在 doc 2 前面
+        norms_arr = array("d", [1.0] * 10)
+        norms_arr[1] = 1.0 / 0.12345599999
+        norms_arr[2] = 1.0 / 0.12345600001
+        tie_reader = MockIndexReader(
+            N=10,
+            postings={"apple": ([2, 1], [1, 1])},
+            norms={"ltc": norms_arr},
+        )
+        hits = rank(Counter({"apple": 1}), None, tie_reader, scheme="ltc.ltc")
+        doc_order = [d for d, _ in hits]
+        return doc_order == [1, 2], f"預期 [1, 2]，得到 {doc_order}"
+
+    total_tests += 1
+    if run("6 位小數精度同分時依 doc_num 升冪排序 (A1)", test_rounded_precision_tie_breaking):
+        total_passed += 1
+
     # -------------------------------------------------------------
     # 4. 候選過濾（T5 整合）驗證
     # -------------------------------------------------------------
@@ -350,7 +369,14 @@ def main() -> None:
                 return False, "無任何命中"
             scores = [s for _, s in hits]
             all_valid = all(0.0 < s <= 1.0000001 for s in scores)
-            is_sorted = all(scores[i] >= scores[i + 1] for i in range(len(scores) - 1))
+            # A1 規範：依輸出精度 6 位小數降冪，同分時嚴格依 docID 升冪
+            is_sorted = True
+            for i in range(len(hits) - 1):
+                r_curr = round(hits[i][1], 6)
+                r_next = round(hits[i + 1][1], 6)
+                if r_curr < r_next or (r_curr == r_next and hits[i][0] >= hits[i + 1][0]):
+                    is_sorted = False
+                    break
             return all_valid and is_sorted, f"命中 {len(hits)} 篇，top-1 doc={hits[0][0]}, score={hits[0][1]:.6f}"
 
         total_tests += 1
@@ -368,8 +394,14 @@ def main() -> None:
                 return False, "無命中"
             # 驗證所有命中文件必在 cands 中
             all_in_cands = all(d in cands for d, _ in hits)
-            scores = [s for _, s in hits]
-            is_sorted = all(scores[i] >= scores[i + 1] for i in range(len(scores) - 1))
+            # A1 規範：依輸出精度 6 位小數降冪，同分時嚴格依 docID 升冪
+            is_sorted = True
+            for i in range(len(hits) - 1):
+                r_curr = round(hits[i][1], 6)
+                r_next = round(hits[i + 1][1], 6)
+                if r_curr < r_next or (r_curr == r_next and hits[i][0] >= hits[i + 1][0]):
+                    is_sorted = False
+                    break
             return all_in_cands and is_sorted, f"候選 {len(cands)} 篇，評分命中 {len(hits)} 篇，top-1 score={hits[0][1]:.6f}"
 
         total_tests += 1
