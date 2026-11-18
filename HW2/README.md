@@ -1,7 +1,7 @@
 # Ranked Retrieval & Vector Space Model Search System (HW2)
 
-> **語料集**：ClueWeb09 English Dataset（基於 HW1 stop+stem 版產物，N = 34,786 篇 Web 文件，共 573,233 個詞項）  
-> **環境**：Python 3.12+ / `uv` 套件管理  
+> **語料集**：ClueWeb09 English 子集 `04.warc`（TREC ID `clueweb09-en0000-04-*`，N = 34,786 篇 Web 文件）；索引沿用 HW1 stop+stem 版產物（573,233 個詞項）  
+> **環境**：需 Python ≥ 3.12、`uv`；本報告數據皆在 Python 3.12 環境量測  
 > **輸出目錄規範**：單數型 `HW2/output/`（本地生成不入版控，打包至 Release ZIP）
 
 ## 0. 成員分工與貢獻
@@ -9,166 +9,132 @@
 > **分工**：
 > 1. **115598022 顏睿寬**：VSM 排序引擎 (`rank.py`)、CLI 介面與輸出管線 (`search.py`)、Skip 指標加速與布林求值 (`skip_builder.py`, `boolean.py`)、端到端測試套件
 > 2. **115598067 施宥丞**：Index Reader 與快取 (`writer.py`)、權重計算與 Norms 預算腳本 (`weighting.py`, `build_norms.py`)、AST 查詢解析與短語/鄰近比對 (`parser.py`, `positional.py`)、原字詞彙層與拼字建議 (`surface.py`, `spelling.py`)
-> 3. **共同負責**：架構設計與演算法選型、實驗設計與消融分析、報告撰寫、系統整合與驗證
+> 3. **共同負責**：架構設計與演算法選型、實驗設計、報告撰寫、系統整合與驗證
 > 4. **GitHub Repo**: https://github.com/Rickuan/26FW-Information-Retrieval
 
 ---
 
 ## 1. 系統簡介
 
-本系統延續 HW1 的底層倒排索引，實作基於**向量空間模型 (Vector Space Model, VSM)** 的高效能排序檢索系統，並全面支援豐富的進階查詢語法與容錯機制。系統架構分為六大核心模組：
-
-1. **Index Reader & Norms Cache (`writer.py`, `weighting.py`)**：以 `mmap` 與記憶體映射技術高速讀取二進制倒排表，提供跳過位置資訊的專屬 `get_doc_tf()`，並以 `doc_norms.bin` 預先快取全量文件歐幾里得長度。
-2. **AST Query Parser (`parser.py`)**：採遞迴下降法解析查詢字串為抽象語法樹 (AST)，支援運算子優先序（`NOT > AND > OR`）、巢狀括號、多詞隱含 AND 以及引號短語。
-3. **Surface Vocab & 容錯展開 (`surface.py`, `spelling.py`)**：在 644,523 個未經字幹提取之原字詞彙層上，以 Bigram 倒排索引支援萬用字元（Wildcard `*`）、Soundex 語音檢索，並以 Damerau-OSA 編輯距離提供原字拼字建議（Did You Mean）。
-4. **Boolean Evaluation Engine (`boolean.py`, `skip_builder.py`)**：遞迴求值 AST 產生候選文件集合；AND 運算子自動由短至長排列並整合 Skip Pointer 跳躍指標加速交集；短語與鄰近比對驗證位置差。
-5. **VSM Ranking Engine (`rank.py`)**：Term-at-a-time (TAAT) 分子累加器，依 SMART 標記法計算 $w_{t,d} \times w_{t,q}$，結合餘弦正規化 (Cosine Normalization)，依分數嚴格降冪並以 docID 嚴格升冪破同分。
-6. **CLI Search Interface (`search.py`)**：命令列查詢入口，支援單一與批次查詢模式，輸出標準 `<doc#> <score:.6f>`，並於 `stderr` 整合拼字更正建議與防呆。
+本系統延續 HW1 的倒排索引，實作基於**向量空間模型 (VSM)** 的排序檢索。查詢流程為：`parser.py` 遞迴下降解析為 AST（`NOT > AND > OR`、括號、隱含 AND、短語、鄰近、萬用字元、`SOUNDEX()`）→ `surface.py` 在原字層展開萬用字元與 Soundex → `boolean.py`／`positional.py` 產生候選文件 → `rank.py` 以 Term-at-a-time 累加並餘弦正規化 → `search.py` 輸出 `<doc#> <score:.6f>`，提示訊息只寫入 `stderr`。
 
 ---
 
-## 2. 環境相依與快速上手
+## 2. 環境與索引
 
-需 Python 3.12+，於專案根目錄透過 `uv` 安裝相依套件：
+於專案根目錄執行 `uv sync` 安裝相依套件。繳交檔已附上完整的 `HW2/index/`，**請直接使用附檔，不需重建**。檢索時讀取的檔案：
 
+| 檔案 | 用途 |
+|---|---|
+| `lexicon.tsv`, `postings.bin`, `metadata.json` | 倒排索引本體（詞項 → $df$／位移、VByte 倒排表、$N$ 與前處理設定） |
+| `doc_map.json` | 文件對照表（`doc#` → TREC ID、URL、文件長度） |
+| `doc_norms.bin`, `doc_norms.meta.json` | `ltc` 文件向量長度 $\lvert d \rvert$（預設 `ltc.ltc` 必要） |
+| `surface_vocab.tsv`, `surface_vocab.meta.json` | 原字詞彙層（需 HW1 未 stem 索引才能重建，務必使用附檔） |
+| `champions.r50.bin`, `.tsv`, `.meta.json` | Champion List（僅 `--champion-r 50` 使用） |
+
+各預算檔的 meta 記錄來源檔的 size 與 sha256，與索引不一致時直接報錯。若需自行重建（各約 15 秒）：
 ```bash
-uv sync
+uv run python HW2/src/build_norms.py --index-dir HW2/index --scheme ltc
+uv run python HW2/src/build_champions.py --index-dir HW2/index --r 50
 ```
 
-### 索引與預算構件確認
-請確保索引目錄位於 `HW2/index/`（內含 `dictionary.txt`, `postings.bin`, `lexicon.tsv`, `metadata.json`, `surface_vocab.*`）。  
-若缺少預算檔案，可透過一鍵腳本快速重建（約 15~20 秒）：
-```bash
-# 重建文件向量長度快取 (約 16 秒)
-uv run python HW2/src/build_norms.py HW2/index --scheme ltc
-
-# 重建 Champion List 快取 (約 15 秒，加分項)
-uv run python HW2/src/build_champions.py HW2/index -r 50
-```
+- **權重方案**：附檔只預建 `ltc` 的 norm 檔。`--scheme` 文件端（`.` 之前）若為 `ltc` 以外、以 `c` 結尾的方案（如 `lnc.ltc`），需先以 `build_norms.py --scheme lnc` 建檔，否則會因缺檔而報錯；文件端以 `n` 結尾（如 `bnn.bnn`）時 $\lvert d \rvert = 1$，不需 norm 檔。
+- **Champion**：只預建 $r = 50$；其他 `--champion-r R` 需先執行 `build_champions.py --r R`。
 
 ---
 
-## 3. 命令列介面與執行指令
-
-以 `HW2/src/search.py` 為統一檢索入口：
+## 3. 執行指令
 
 ```bash
-# 1. 基本自由文字查詢 (預設輸出所有 score > 0；加上 --top-k K 截斷)
-uv run python HW2/src/search.py --top-k 5 "Microsoft"
-
-# 2. 布林結構查詢 (AND, OR, NOT 與巢狀括號)
-uv run python HW2/src/search.py --top-k 5 "open source AND Linux"
-uv run python HW2/src/search.py --top-k 5 "software engineer OR project manager"
-uv run python HW2/src/search.py --top-k 5 "(apple OR google) AND NOT hardware"
-
-# 3. 短語查詢 (Phrase) 與鄰近查詢 (Proximity /k)
-uv run python HW2/src/search.py --top-k 5 '"open source"'
-uv run python HW2/src/search.py --top-k 5 'linux /5 kernel'
-
-# 4. 萬用字元查詢 (Wildcard *) 與 Soundex 語音檢索
-uv run python HW2/src/search.py --top-k 5 'comput*'
-uv run python HW2/src/search.py --top-k 5 'SOUNDEX(robert)'
-
-# 5. 加分項：切換 SMART 方案與 Champion List
-uv run python HW2/src/search.py --scheme bnn.bnn --top-k 5 "Microsoft"
-uv run python HW2/src/search.py --champion-r 50 --top-k 5 "Linux"
-
-# 6. 批次查詢檔案 (--queries FILE) 與寫入輸出目錄
-uv run python HW2/src/search.py --queries HW2/queries.txt --output-dir HW2/output
+uv run python HW2/src/search.py --top-k 5 "Microsoft"                           # 自由文字
+uv run python HW2/src/search.py --top-k 5 "(apple OR google) AND NOT hardware"  # 布林
+uv run python HW2/src/search.py --top-k 5 '"open source"'                       # 短語
+uv run python HW2/src/search.py --top-k 5 'linux /5 kernel'                     # 鄰近
+uv run python HW2/src/search.py --top-k 5 'co*tion'                             # 萬用字元
+uv run python HW2/src/search.py --top-k 5 'SOUNDEX(robert)'                     # Soundex
+uv run python HW2/src/search.py --scheme bnn.bnn --champion-r 50 "Linux"        # 加分項
+uv run python HW2/src/search.py --queries HW2/queries.txt --output-dir HW2/output  # 批次
 ```
 
----
-
-## 4. 系統主要特色與加分項實作
-
-### 1. 向量空間模型 (VSM) 與精確破同分
-- **權重公式**：嚴格依作業規範採用 $w = (1 + \log_{10} tf) \times \log_{10}(N / df)$（以 10 為底，防呆排除自然對數 `math.log`）。
-- **餘弦相似度**：$sim(d, q) = \frac{\sum w_{t,d} w_{t,q}}{|d| \cdot |q|}$，文件長度 $|d|$ 與查詢長度 $|q|$ 均對全量維度作二次和開根號。
-- **嚴格破同分 (Tie-breaking)**：排序依 `key=lambda x: (-x[1], x[0])`，以雙精度浮點數原始分數降冪，同分時嚴格依內部整數 `doc#` 遞增排序，輸出格式精確至小數點後 6 位。
-
-### 2. 結構化布林過濾與評分分離架構
-- 克服 HW1 查詢時中間結果破壞 tf 的缺陷，HW2 採**「布林過濾 + VSM 評分」分離設計**：
-  - 自由文字查詢（如 `Microsoft`）：布林引擎回傳 `None`（不過濾），由 VSM 引擎全域累加召回。
-  - 布林複合查詢（如 `A AND B`）：布林引擎產出候選 `set[docID]`，VSM 引擎僅對候選文件累加評分並保留真實 `qtf`。
-- 純 `NOT` 查詢防呆：純 `NOT` 查詢依 VSM 定義無正向查詢向量，系統自動 short-circuit 回傳空清單，輸出 0 筆文件。
-
-### 3. 高速倒排表解碼 (`get_doc_tf`) 與 LRU 快取
-- 專為 VSM 設計之 `get_doc_tf()`：利用 `mmap` 切片走訪 VByte 倒排表，**在位元組層級直接跳過所有 positions 串列**，無需浪費 CPU 解碼無關位置，讀取速度較全量 `get_postings` 提升約 **3.5 倍**。
-- 提供可配置之 LRU 查詢快取（`set_doc_tf_cache`），重覆詞項直接記憶體回傳。
-
-### 4. Skip Pointer 跳躍指標加速布林交集（加分項 5）
-- 布林求值引擎自包含導入 `skip_builder.py`，動態為 `get_doc_tf` 產出之文件串列建立跳躍指標（$L = \lfloor\sqrt{P}\rfloor$）。
-- `And` 運算自動將子節點依 $df$ 由小到大排序，由最稀疏的倒排表兩兩交集；在長短串列比對時比對次數大幅減少超過 **90%**。
-
-### 5. 短語查詢 (Phrase) 與鄰近檢索 (Proximity `/k`)（加分項 1 & 2）
-- **停用詞空洞保真**：前處理器在過濾停用詞時嚴格保留 position 序號（例如 `"lord of the rings"` 標記為 pos 1 與 pos 4）。
-- 短語檢索比對相鄰詞的位置差恰好等於詞距；鄰近檢索（如 `linux /5 kernel`）判定兩詞之最短跨度 $\le k$，精準剔除重疊與失序。
-
-### 6. 原字詞彙層萬用字元與 Soundex 展開（加分項 6 & 11）
-- **原字層檢索架構**：針對倒排索引已 stem（例如 `computing` 被切為 `comput`）導致 `computing*` 比對失敗的問題，本系統建構專屬 `SurfaceVocab`（644,523 個原字）：
-  - 萬用字元（`comput*`）：透過原字 Bigram 倒排索引初篩，經正規表達式確認後，再轉為 stem 去重取前 100 名高頻詞展開為 `Or` 節點。
-  - Soundex（`SOUNDEX(robert)`）：依美式 Soundex 演算法將同代碼名詞（如 `R163`）展開。
-
-### 7. 智慧拼字更正建議（Did You Mean）（加分項 7）
-- 依使用者輸入之原字，透過 Bigram Jaccard 相似度初篩，並依 Damerau-OSA 最小編輯距離排序。
-- **原字信賴比觸發**：語料庫本身存在錯字（如 `retreival` df=11），純 `df==0` 會失真；系統僅在建議詞之原字 $df$ 大於原詞 10 倍以上，且檢索結果稀少（$< 20$ 筆）時於 `stderr` 提示，絕不污染 `stdout`。
-
-### 8. 不精確 Top-k 檢索：Champion Lists（加分項 8a）
-- 離線建置 `champions.r50.bin`：對所有 $df > 50$ 的詞項預先儲存依 $w_{t,d}$ 排序之前 50 名文件清單。
-- 查詢時傳入 `--champion-r 50` 即可僅對候選精英名單評分，大幅縮減大詞項的累加開銷。
+- 預設輸出所有 score > 0 的文件，`--top-k K` 截斷；單一查詢可用 `-o FILE` 寫檔。
+- 批次查詢加上 `--output-dir DIR` 時，第 $i$ 行的 query 寫入 `DIR/query_<i>.txt`（空白行略過但仍佔行號）；未指定時各 query 結果直接接續印至 `stdout`，**中間沒有分隔行**。
+- 語法錯誤時於 `stderr` 指出錯誤並以 exit code 1 結束（批次中後續 query 不再執行）。
 
 ---
 
-## 5. 核心實驗與效能分析
+## 4. 系統特色與加分項
 
-### 實驗一：倒排表讀取最佳化 (`get_doc_tf` vs `get_postings`)
-評估全量 34,786 篇文件索引中，跳過 positions VByte 對讀取效能的影響（高頻詞 `open` df=5,944, `sourc` df=4,062）：
+### 1. VSM 與破同分
+- **權重**：$w = (1 + \log_{10} tf) \times \log_{10}(N / df)$，只在 `weighting.py` 實作一次，`build_norms.py` 與 `rank.py` 共用；餘弦相似度 $sim(d, q) = \frac{\sum w_{t,d} w_{t,q}}{|d| \cdot |q|}$。
+- **破同分**：排序鍵為 `(-round(score, 6), doc#)`，分數先四捨五入至與輸出相同的 6 位小數再降冪，相同者依 `doc#` 遞增，因此輸出中看起來同分的文件 `doc#` 一定嚴格遞增。
 
-| 測試詞項 | $df$ | `get_postings` 耗時 (含解碼 positions) | `get_doc_tf` 耗時 (跳過 positions) | 速度提升倍率 |
+### 2. 布林過濾與評分分離
+- 整個查詢只有一個運算元（如 `Microsoft`、`United States government`）時視為自由文字，不過濾，由 VSM 對含任一查詢詞的文件評分；布林複合查詢則先產出候選集合，VSM 只對候選評分。
+- `NOT` 子樹內的詞不計入評分詞；純 `NOT` 查詢沒有查詢向量，直接回傳 0 筆。
+
+### 3. `get_doc_tf` 與 LRU 快取
+- `get_doc_tf()` 在位元組層級跳過 positions，不建立 `Posting` 物件；單次讀取一個詞項比 `get_postings` 快約 **3.2～3.8 倍**（實驗一），這不是整體檢索時間的倍數。
+- `set_doc_tf_cache(maxsize)` 提供 LRU 快取，屬程式 API 選項，**CLI 預設關閉**。
+
+### 4. Skip Pointer（加分項 5）
+- 布林結構內的多詞運算元（如 `open source AND Linux` 中的 `open source`）依 $df$ 由小到大以 `intersect_with_skips` 兩兩交集（$L = \lfloor\sqrt{P}\rfloor$）；顯式 `AND` 則對子節點結果做集合交集。
+
+### 5. 短語與鄰近（加分項 1 & 2）
+- 前處理保留停用詞空洞的位置（`"lord of the rings"` → pos 1 與 4），短語要求位置差恰好等於詞距。
+- 鄰近 `a /k b`：兩側位置區間的間隔 $\le k$ 即命中，**不分先後**，重疊不算；`linux /5 kernel` 與 `kernel /5 linux` 皆 192 篇。
+
+### 6. 萬用字元與 Soundex（加分項 6 & 11）
+- 索引已 stem，`computing*` 無法直接比對，故改在原字層比對：`*` 可出現在任意位置（`comput*`、`*mon`、`co*tion`），以 Bigram 索引初篩、正規表達式確認，再轉 stem 去重，依 $df$ 取前 100 個展開為 `Or`（超過時於 `stderr` 警告）。
+- `SOUNDEX(robert)` 取同代碼（`R163`）的純英文字母原字，同樣轉 stem 取前 100 個。
+
+### 7. 拼字建議（加分項 7）
+- Bigram Jaccard（$\ge 0.3$）初篩，排除與原字同 stem 者，依 Damerau-OSA 距離排序。
+- 有候選且「原字 $df = 0$」或「最佳建議原字 $df \ge$ 原字 $df \times 10$」時觸發，在結果少於 20 筆時於 `stderr` 顯示前 3 個。例：`retreival`（$df = 1$）→ `retrieval`（$df = 81$）。
+
+### 8. Champion Lists（加分項 8a）
+- 對 $df > 50$ 的 15,755 個詞項，依 **$tf$ 由大到小**選取前 50 篇（$df \le 50$ 直接用完整倒排表）；`--champion-r 50` 只對這些文件評分，分母仍用完整 $\lvert d \rvert$，結果**不精確**。
+
+---
+
+## 5. 實驗
+
+### 實驗一：`get_doc_tf` vs `get_postings`
+暖身後各跑 21 次取中位數（x86_64 / Linux，耗時依機器而異）：
+
+| 詞項 | $df$ | `get_postings` | `get_doc_tf` | 倍率 |
 |---|---|---|---|---|
-| `sourc` | 4,062 | 4.82 ms | **1.35 ms** | **3.57x** |
-| `open` | 5,944 | 7.15 ms | **2.01 ms** | **3.56x** |
-| `linux` | 997 | 1.18 ms | **0.34 ms** | **3.47x** |
+| `home` | 22,611 | 26.25 ms | **6.83 ms** | **3.84x** |
+| `open` | 5,944 | 6.34 ms | **1.98 ms** | **3.21x** |
+| `linux` | 997 | 1.13 ms | **0.34 ms** | **3.29x** |
 
-> **分析**：VSM 排序只需 docID 與詞頻 $tf$。在位元組串流層直接跳過可變長度之 positions 資料，省去大量整數分配與解碼計算，使整體檢索加速約 3.5 倍。
+### 實驗二：Skip Pointer 比對次數
+以 `intersect_postings(use_skip=False／True)` 對真實倒排表計數（與機器無關，可完全重現）：
 
-### 實驗二：Skip Pointer 加速布林 AND 交集
-於布林引擎中驗證 `intersect_with_skips` 相對線性走訪之比對次數：
-
-| 測試案例 | 串列長度 ($P_1, P_2$) | 線性比對次數 | Skip 比對次數 | 比對次數減少率 |
+| 詞項 | 串列長度 | 線性 | Skip | 變化 |
 |---|---|---|---|---|
-| **長短串列 (稀疏跳躍)** | 997 vs 28 | 1,025 次 | **132 次** | **-87.1%** |
-| **合成極端測試集** | 2,401 vs 49 | 2,401 次 | **204 次** | **-91.5%** |
-| **密集重疊串列** | 4,062 vs 5,944 | 8,920 次 | **8,920 次** | **平滑退化 (0%)** |
+| `linu` & `linux` | 28 vs 997 | 986 | **567** | **-42.5%** |
+| `kernel` & `linux` | 279 vs 997 | 1,028 | **908** | **-11.7%** |
+| `sourc` & `open` | 4,062 vs 5,944 | 8,496 | **8,592** | **+1.1%** |
+| `project` & `manag` | 4,556 vs 7,062 | 9,919 | **9,613** | **-3.1%** |
 
-> **分析**：當串列長度懸殊時，Skip 指標透過跨步跳躍省去絕大多數無效比對；當兩者頻率相當時，演算法平滑退化為線性走訪，不產生額外效能負擔。
+> 長度懸殊時可整段跳過、明顯減少比對；長度相近的密集串列幾乎每步都需前進，檢查跳躍目標反而略增。
 
-### 實驗三：Champion List 不精確檢索效率與品質
-比對 `Linux` 查詢在精確 VSM 模式與 Champion List ($r=50$) 模式：
+### 實驗三：Champion List（`Linux`，$r = 50$）
+`rank()` 暖身後跑 51 次取中位數：
 
-| 評分模式 | 累加命中文件數 | Top-1 DocID | Top-1 Score | 總評分耗時 |
+| 模式 | 命中文件 | Top-1 | `rank()` 耗時 | 與精確結果重疊（Top-1／10／50） |
 |---|---|---|---|---|
-| **精確 VSM (全量 997 篇)** | 997 篇 | 9554 | 0.126880 | **4.21 ms** |
-| **Champion List ($r=50$)** | 50 篇 | 9554 | 0.126880 | **0.86 ms** (**4.89x**) |
+| 精確 VSM | 997 | 20949（0.187963） | 1.053 ms | — |
+| Champion | 50 | 9554（0.126880） | **0.045 ms** | 0／2／8 |
 
-> **分析**：Champion List 僅以詞項最高權重前 50 篇文件作為候選累加器，不僅 Top-1 文件與分數完全一致，計算時間縮短近 5 倍。
+> 速度快約 23 倍，但品質明顯下降：精確 Top-1 不在 champion 名單中。選取只依 $tf$，而 $tf$ 高的多為長文件，正規化後分數偏低（Top-10 的文件長度中位數：精確 164.5、champion 494.5）。
 
 ---
 
 ## 6. 重大困難與解決方案
 
-1. **已 Stem 索引與萬用字元（Wildcard）之語意衝突**：
-   * *困難*：HW1 索引已全面套用 Porter stemmer（例如 `computing` $\to$ `comput`）。若直接在 stem 詞項上做前綴搜尋，使用者輸入 `computing*` 會因為前綴長度超過字幹而無法匹配，造成嚴重的低召回。
-   * *解法*：獨立抽取出 644,523 個未經 stem 的真實詞彙庫（`surface_vocab`），萬用字元一律在原字層比對符合之單字，再轉換為對應 stem 並依 $df$ 降冪去重取前 100 名展開為 `Or` 節點。
-2. **語料庫錯字干擾與拼字建議觸發門檻**：
-   * *困難*：網路語料充斥錯字，若單純以「$df == 0$ 才觸發建議」，面對語料中存在 11 篇的 `retreival` 將完全無法提示正確的 `retrieval`（$df=409$）。
-   * *解法*：設計原字詞頻比門檻：當候選修正詞之原字 $df$ 達原字 10 倍以上、且檢索結果稀少時才觸發；並將建議統一導向 `stderr`，絕不污染 `stdout`。
-3. **多詞運算元語意判定：隱含 AND vs 短語**：
-   * *困難*：使用者輸入 `open source` 若預設解析為短語（Phrase），會將詞距大於 1 的高度相關文件全數濾除，大幅降低召回率。
-   * *解法*：語意定案為現代搜尋引擎標準的「隱含 AND」；唯有使用者主動以雙引號包覆（`"open source"`）時才以 `Phrase` 節點執行嚴格位置約束比對。
-4. **純 NOT 查詢無評分詞之邊界崩潰**：
-   * *困難*：若使用者輸入 `NOT linux`，AST 中只有 `Not` 節點，評分詞集合為空，計算餘弦相似度時分母 $|q|=0$ 導致除以零錯誤。
-   * *解法*：回歸向量空間模型數學本質：無查詢向量即無法計算方向夾角。系統在提取查詢詞項時判定 `qtf` 為空即短路回傳空清單，退出碼為 0 且不輸出任何文件。
-5. **浮點數精度誤差與跨平台同分排序保證**：
-   * *困難*：不同架構下浮點數微小捨入誤差可能導致同分判定不一致，進而影響輸出順序。
-   * *解法*：排序鍵強制嚴格採用原始雙精度浮點數降冪，同分時以內部整數 `doc#` 升冪（`key=lambda x: (-x[1], x[0])`），輸出格式化統一強制保留 6 位小數（`f"{score:.6f}"`）。
+1. **已 stem 索引與萬用字元衝突**：`computing*` 在 stem 詞項（`comput`）上無法比對。→ 另建 644,523 個原字的 `surface_vocab`，在原字層比對後再轉 stem 展開。
+2. **語料錯字使 `df == 0` 門檻失效**：`retreival` 在語料中出現過（原字 $df = 1$），純 `df == 0` 不會提示 `retrieval`（$df = 81$）。→ 改用「最佳建議原字 $df \ge$ 原字 $df \times 10$」門檻，並只輸出至 `stderr`。
+3. **多詞運算元語意**：若預設為短語會濾掉大量相關文件。→ 未加引號解析為隱含 AND（在布林結構內要求所有詞都出現；單獨成為整個查詢時視為自由文字），加引號才是 `Phrase`。
+4. **純 NOT 查詢無評分詞**：`NOT linux` 沒有評分詞，$|q| = 0$ 會除以零。→ `qtf` 為空即回傳空清單，exit code 0。
+5. **輸出精度與同分順序不一致**：原本以原始分數排序、輸出卻只到 6 位小數，4 個範例 query 共 803 處「看似同分但 `doc#` 逆序」（801 處為小於 $10^{-6}$ 的真實分差，2 處為浮點微差）。→ 排序鍵改為 `(-round(score, 6), doc#)`，排序依據與輸出精度一致。
