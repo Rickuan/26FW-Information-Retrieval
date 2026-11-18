@@ -203,6 +203,16 @@ def main() -> int:
         _test_cli_spelling_stderr()
     ))
 
+    total += 1
+    passed += run("CLI --top-k 截斷不應觸發高頻詞拼字建議 (A3)", lambda: (
+        _test_cli_spelling_topk_suppressed()
+    ))
+
+    total += 1
+    passed += run("CLI 缺檔時優雅印出錯誤與提示退出碼 1 (A2)", lambda: (
+        _test_cli_missing_norm_file()
+    ))
+
     print("\n" + "=" * 60)
     print("T7 整合端到端與子行程 (Step 7.5) 測試")
     print("=" * 60)
@@ -383,6 +393,38 @@ def _test_subprocess_cli() -> tuple[bool, str]:
     if len(lines) != 2:
         return False, f"expected 2 lines, got {len(lines)}"
     return True, f"subprocess exit 0, output: {lines}"
+
+
+def _test_cli_spelling_topk_suppressed() -> tuple[bool, str]:
+    # 查詢高頻詞 Microsoft (2301 篇 > 20)，即使指定 --top-k 5 也不應觸發拼字建議至 stderr
+    buf_out = io.StringIO()
+    buf_err = io.StringIO()
+    with redirect_stdout(buf_out), redirect_stderr(buf_err):
+        ret = search_main(["--index-dir", str(INDEX), "--top-k", "5", "Microsoft"])
+    if ret != 0:
+        return False, f"search_main returned {ret}"
+    if "Did you mean" in buf_err.getvalue():
+        return False, f"spelling suggestion unexpectedly triggered for Microsoft with top-k=5: {buf_err.getvalue()!r}"
+    lines = buf_out.getvalue().strip().splitlines()
+    if len(lines) != 5:
+        return False, f"expected 5 lines, got {len(lines)}"
+    return True, "高頻詞配合 --top-k 5 未觸發 stderr 拼字建議"
+
+
+def _test_cli_missing_norm_file() -> tuple[bool, str]:
+    # 測試缺少 norm 檔時優雅捕捉 FileNotFoundError，印出 Error 與 Hint，回傳 exit 1
+    buf_out = io.StringIO()
+    buf_err = io.StringIO()
+    with redirect_stdout(buf_out), redirect_stderr(buf_err):
+        ret = search_main(["--index-dir", str(INDEX), "--scheme", "lnc.ltc", "Microsoft"])
+    if ret != 1:
+        return False, f"expected exit code 1, got {ret}"
+    err_text = buf_err.getvalue()
+    if "Error:" not in err_text or "build_norms.py" not in err_text:
+        return False, f"expected Error and build_norms hint in stderr, got {err_text!r}"
+    if "Traceback" in err_text:
+        return False, f"unexpected traceback in stderr: {err_text!r}"
+    return True, "缺少 norm 檔時優雅輸出提示且退出碼為 1"
 
 
 if __name__ == "__main__":
