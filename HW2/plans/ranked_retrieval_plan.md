@@ -89,9 +89,9 @@ def load_surface(reader: IndexReader) -> SurfaceVocab: ...              # 載入
 # T5 — boolean.py（已完成，見 .done.T5-boolean-evaluate.md）
 def evaluate(node: Node, reader: IndexReader) -> set[int] | None: ...   # 根為 Term 回傳 None（不過濾），其餘回傳候選 doc 集合
 
-# T6 — rank.py（已完成，見 .done.T6-vsm-rank.md）
+# T6 — rank.py（已完成，見 .done.T6-vsm-rank.md、P8-pre-submission-patch.md）
 def rank(qtf: Counter[str], candidates: set[int] | None, reader: IndexReader,
-         scheme: str = "ltc.ltc", champion_r: int | None = None) -> list[tuple[int, float]]: ...  # 依 (-score, doc) 排序
+         scheme: str = "ltc.ltc", champion_r: int | None = None) -> list[tuple[int, float]]: ...  # 依 (-round(score, 6), doc) 排序
 
 # T7 — search.py CLI（已完成，見 .done.T7-search-cli.md）
 # uv run python HW2/src/search.py --index-dir HW2/index [--top-k K] [--queries FILE] [--scheme SCHEME] "query"
@@ -135,7 +135,7 @@ hits  = rank(qtf, cands, reader)      # T6：VSM 計算分數並排序 → T7 �
   - 防呆：輸入必須先經 `expand`，遇 `Wildcard` 或 `Soundex` 拋 `ValueError`。
 - **T6 VSM 排序（已完成，見 `.done.T6-vsm-rank.md`）**：
   - Term-at-a-time 累加器：逐評分 term 讀取 `get_doc_tf(t)`，對候選集合內（若為 None 則全部）文件累加 `acc[doc] += w_td * w_tq`。不在 dict 者 df=0 略過。
-  - 最終分數 `score = acc[doc] / (norm[doc] * |q|)`，依 `(-score, doc)` 排序（同分 docID 小在前）。
+  - 最終分數 `score = acc[doc] / (norm[doc] * |q|)`，依 `(-round(score, 6), doc)` 排序（同分依 6 位輸出精度嚴格由 docID 小在前）。
   - 加分：SMART scheme 切換（如 `lnc.ltc`）；`champion_r` 開啟不精確 top-k。
 - **T7 輸出與 CLI 入口（已完成，見 `.done.T7-search-cli.md`）**：
   - CLI 支援單一 query 與 `--queries` 批次模式；每行輸出 `<doc#> <score>`（不加表頭，空白分隔，小數 6 位，同分嚴格依 `<doc#>` 遞增排序；預設輸出所有 score > 0，另加 `--top-k`）。
@@ -217,18 +217,23 @@ hits  = rank(qtf, cands, reader)      # T6：VSM 計算分數並排序 → T7 �
   - *決策依據*：HW1 的 query 將中間結果包成假 posting 導致 tf 遺失；HW2 決定評分時保留 query 所有 term 的真實 qtf，Boolean 只單純負責產出候選 docID 集合供 VSM 過濾。
 - **純 NOT 查詢與評分短路**：
   - *決策依據*：純 NOT 查詢無 query 評分詞（`qtf` 為空），依向量空間模型無查詢向量可供比對，T6 直接回傳空結果 `[]`，符合現代搜尋引擎語意與 VSM 數學定義。
-- **T6 排序與 T7 top-k 職責分離**：
-  - *決策依據*：`rank()` 專注於正確計算與破同分排序（依原始雙精度 float 與 docID 升冪），回傳所有 `score > 0` 的完整排序候選清單；Top-k 截斷與 6 位小數展示格式化一律交由下游 T7 CLI 處理，維持演算法核心的純粹性。
+- **T6 排序破同分與 6 位小數輸出精度一致化**：
+  - *決策依據*：若依原始雙精度 float 排序，微差 1e-16 在輸出截斷至 6 位小數時會呈現 docID 逆序（TA 判定為錯）。排序鍵定案為 `(-round(score, 6), doc)`，同時抹平不同硬體 libm 的 1e-14 浮點微差。
+- **拼字更正建議門檻評估提前至 top-k 截斷前**：
+  - *決策依據*：若在截斷後才判定 `len(hits) < 20`，只要傳入 `--top-k < 20`（如預設示範 5），每筆查詢皆會額外耗費 1.6s 建置 k-gram index。改於截斷前依全量召回數判定。
+- **CLI 缺檔友善提示**：
+  - *決策依據*：`main()` 捕捉 `FileNotFoundError`，印出明確之重建指令（`build_norms.py`、`build_champions.py`）並以狀態碼 1 退出，避免 bare traceback。
 
 ### 3. 已知限制
 
 - **純 NOT query**（例如 `NOT linux`）：`query_terms` 跳過 Not 子樹無評分詞，cosine 無法排序。
-- **拼字建議**（T4c）：原字比對不識語意，罕見人名可能觸發；初次呼叫建 k-gram 需 ~1.6s，建議僅於結果過少時呼叫。
+- **拼字建議**（T4c）：原字比對不識語意，罕見人名可能觸發；初次呼叫建 k-gram 需 ~1.6s，僅於全量召回少於 20 筆時觸發。
 - **Wildcard**（T4c）：原字比對轉 stem 檢索，展開上限 100 筆截斷。
 - **Soundex**：為人名設計，一般字彙碰撞多，僅作輔助參考。
 
-### 4. 待確認事項
+### 4. 待確認事項與交件 Patch
 
 - [x] 純 `NOT x` 的 query：無評分詞時依 VSM 定義無 query 向量，T6 直接回傳空結果 `[]`，T7 不輸出文件。
-- [x] 輸出是否要截斷 top-k：T6 專注計算並回傳所有 `score > 0` 的排序清單；由 T7 CLI 接收 `--top-k` 參數進行截斷（預設輸出全量 score > 0）。
-- [ ] zip 是否附 index 與 `doc_norms*.bin`、`champions.*`。
+- [x] 輸出是否要截斷 top-k：T6 專注計算並回傳所有 `score > 0` 的排序清單；由 T7 CLI 接收 `--top-k` 參數進行截斷。
+- [x] zip 是否附 index 與 `doc_norms*.bin`、`champions.*`：定案附上，確保 TA 執行結果與本報告一致。
+- [ ] **P8 交件前雙軌修正計畫**：見 `HW2/plans/P8-pre-submission-patch.md`（Track 1 代碼與輸出、Track 2 報告校正、Track 3 打包）。
