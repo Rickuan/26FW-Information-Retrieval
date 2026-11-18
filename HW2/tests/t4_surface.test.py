@@ -139,10 +139,22 @@ def _matches_hw1():
     return src == list(zip(words, dfs)), f"HW1 lexicon {len(src)} 列"
 
 
-if (HW1_OUTPUT / "lexicon.tsv").exists():
+def _is_unstemmed_hw1(path: Path) -> bool:
+    meta_path = path / "metadata.json"
+    if not meta_path.exists():
+        return False
+    try:
+        m = json.loads(meta_path.read_text(encoding="utf-8"))
+        prep = m.get("preprocessor", {})
+        return not prep.get("stem", True) and not prep.get("stopword", True)
+    except Exception:
+        return False
+
+
+if (HW1_OUTPUT / "lexicon.tsv").exists() and _is_unstemmed_hw1(HW1_OUTPUT):
     results.append(run("原字、df 與 HW1/output/lexicon.tsv 完全相同", _matches_hw1))
 else:
-    print("  [SKIP] 沒有 HW1/output/lexicon.tsv")
+    print("  [SKIP] 沒有未 stem 的 HW1/output/lexicon.tsv")
 
 # ===========================================================================
 section("2. 一致性（測試內重新算，不信任 meta）")
@@ -304,10 +316,10 @@ def _rebuild_same():
         return same and not any(n.endswith(".tmp") for n in names), f"tempdir 內容 {names}"
 
 
-if (HW1_OUTPUT / "lexicon.tsv").exists():
+if (HW1_OUTPUT / "lexicon.tsv").exists() and _is_unstemmed_hw1(HW1_OUTPUT):
     results.append(run("重新建置到 tempdir：tsv 與 HW2/index 的 byte 相同，沒有殘留 .tmp", _rebuild_same))
 else:
-    print("  [SKIP] 沒有 HW1/output，略過重新建置")
+    print("  [SKIP] 沒有未 stem 的 HW1/output，略過重新建置")
 
 # ===========================================================================
 section("6. 原字 k-gram index（§6.8.2）")
