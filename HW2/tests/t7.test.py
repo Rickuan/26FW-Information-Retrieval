@@ -78,20 +78,28 @@ def main() -> int:
         "search_query('nonexistentwordxyz123') == []"
     ))
 
+    def _is_sorted(hits):
+        for i in range(len(hits) - 1):
+            r_curr = round(hits[i][1], 6)
+            r_next = round(hits[i + 1][1], 6)
+            if r_curr < r_next or (r_curr == r_next and hits[i][0] >= hits[i + 1][0]):
+                return False
+        return True
+
     # 2. 正常查詢與排序
     total += 1
     passed += run("真實索引: 'Microsoft' 排序與分數健全性", lambda: (
         len(hits := search_query("Microsoft", reader, pre)) > 2000 and
         hits[0][0] == 28281 and
         0 < hits[0][1] <= 1.0 and
-        all(hits[i][1] >= hits[i + 1][1] for i in range(len(hits) - 1)),
+        _is_sorted(hits),
         f"命中 {len(hits)} 篇，top-1 doc={hits[0][0]}, score={hits[0][1]:.6f}"
     ))
 
     total += 1
     passed += run("複合查詢: 'open source AND Linux'", lambda: (
         len(hits := search_query("open source AND Linux", reader, pre)) == 294 and
-        all(hits[i][1] >= hits[i + 1][1] for i in range(len(hits) - 1)),
+        _is_sorted(hits),
         f"命中 {len(hits)} 篇，top-1 doc={hits[0][0]}, score={hits[0][1]:.6f}"
     ))
 
@@ -193,6 +201,16 @@ def main() -> int:
     total += 1
     passed += run("CLI 錯字查詢觸發 stderr 拼字建議且 stdout 為空", lambda: (
         _test_cli_spelling_stderr()
+    ))
+
+    total += 1
+    passed += run("CLI --top-k 截斷不應觸發高頻詞拼字建議 (A3)", lambda: (
+        _test_cli_spelling_topk_suppressed()
+    ))
+
+    total += 1
+    passed += run("CLI 缺檔時優雅印出錯誤與提示退出碼 1 (A2)", lambda: (
+        _test_cli_missing_norm_file()
     ))
 
     print("\n" + "=" * 60)
@@ -375,6 +393,38 @@ def _test_subprocess_cli() -> tuple[bool, str]:
     if len(lines) != 2:
         return False, f"expected 2 lines, got {len(lines)}"
     return True, f"subprocess exit 0, output: {lines}"
+
+
+def _test_cli_spelling_topk_suppressed() -> tuple[bool, str]:
+    # 查詢高頻詞 Microsoft (2301 篇 > 20)，即使指定 --top-k 5 也不應觸發拼字建議至 stderr
+    buf_out = io.StringIO()
+    buf_err = io.StringIO()
+    with redirect_stdout(buf_out), redirect_stderr(buf_err):
+        ret = search_main(["--index-dir", str(INDEX), "--top-k", "5", "Microsoft"])
+    if ret != 0:
+        return False, f"search_main returned {ret}"
+    if "Did you mean" in buf_err.getvalue():
+        return False, f"spelling suggestion unexpectedly triggered for Microsoft with top-k=5: {buf_err.getvalue()!r}"
+    lines = buf_out.getvalue().strip().splitlines()
+    if len(lines) != 5:
+        return False, f"expected 5 lines, got {len(lines)}"
+    return True, "高頻詞配合 --top-k 5 未觸發 stderr 拼字建議"
+
+
+def _test_cli_missing_norm_file() -> tuple[bool, str]:
+    # 測試缺少 norm 檔時優雅捕捉 FileNotFoundError，印出 Error 與 Hint，回傳 exit 1
+    buf_out = io.StringIO()
+    buf_err = io.StringIO()
+    with redirect_stdout(buf_out), redirect_stderr(buf_err):
+        ret = search_main(["--index-dir", str(INDEX), "--scheme", "lnc.ltc", "Microsoft"])
+    if ret != 1:
+        return False, f"expected exit code 1, got {ret}"
+    err_text = buf_err.getvalue()
+    if "Error:" not in err_text or "build_norms.py" not in err_text:
+        return False, f"expected Error and build_norms hint in stderr, got {err_text!r}"
+    if "Traceback" in err_text:
+        return False, f"unexpected traceback in stderr: {err_text!r}"
+    return True, "缺少 norm 檔時優雅輸出提示且退出碼為 1"
 
 
 if __name__ == "__main__":

@@ -115,6 +115,6 @@ def rank(
         if score > 0.0:
             hits.append((d, score))
 
-    # 分數高者在前；同分時依 doc_num 由小到大嚴格遞增
-    hits.sort(key=lambda x: (-x[1], x[0]))
+    # 分數高者在前；依輸出精度（6 位小數）四捨五入同分時依 doc_num 由小到大嚴格遞增
+    hits.sort(key=lambda x: (-round(x[1], 6), x[0]))
     return hits

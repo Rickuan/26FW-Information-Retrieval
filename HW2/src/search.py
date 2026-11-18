@@ -173,22 +173,32 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.query is not None:
         try:
-            hits = search_query(
+            all_hits = search_query(
                 args.query,
                 reader,
                 pre,
                 scheme=args.scheme,
                 champion_r=args.champion_r,
-                top_k=args.top_k,
             )
         except ValueError as e:
             sys.stderr.write(f"Query error: {e}\n")
             return 1
+        except FileNotFoundError as e:
+            doc_scheme = args.scheme.split(".")[0] if "." in args.scheme else args.scheme
+            if "doc_norms" in str(e):
+                sys.stderr.write(f"Error: {e}\nHint: run `uv run python HW2/src/build_norms.py --index-dir {args.index_dir} --scheme {doc_scheme}`\n")
+            elif "champions" in str(e):
+                sys.stderr.write(f"Error: {e}\nHint: run `uv run python HW2/src/build_champions.py --index-dir {args.index_dir} --r {args.champion_r}`\n")
+            else:
+                sys.stderr.write(f"Error: {e}\n")
+            return 1
 
-        if len(hits) < FEW_RESULTS_THRESHOLD:
+        # A3: 拼字建議依全量召回數判斷，避免因 --top-k 截斷而產生額外延遲
+        if len(all_hits) < FEW_RESULTS_THRESHOLD:
             for word, suggs in suggest_spelling_corrections(args.query, reader, pre):
                 sys.stderr.write(f"Did you mean for '{word}': {', '.join(suggs)}?\n")
 
+        hits = all_hits[:args.top_k] if args.top_k is not None else all_hits
         formatted = format_hits(hits)
         if args.output:
             out_file = Path(args.output)
@@ -214,22 +224,32 @@ def main(argv: list[str] | None = None) -> int:
         if not q:
             continue
         try:
-            hits = search_query(
+            all_hits = search_query(
                 q,
                 reader,
                 pre,
                 scheme=args.scheme,
                 champion_r=args.champion_r,
-                top_k=args.top_k,
             )
         except ValueError as e:
             sys.stderr.write(f"Query error on line {idx} ({q!r}): {e}\n")
             return 1
+        except FileNotFoundError as e:
+            doc_scheme = args.scheme.split(".")[0] if "." in args.scheme else args.scheme
+            if "doc_norms" in str(e):
+                sys.stderr.write(f"Error on line {idx}: {e}\nHint: run `uv run python HW2/src/build_norms.py --index-dir {args.index_dir} --scheme {doc_scheme}`\n")
+            elif "champions" in str(e):
+                sys.stderr.write(f"Error on line {idx}: {e}\nHint: run `uv run python HW2/src/build_champions.py --index-dir {args.index_dir} --r {args.champion_r}`\n")
+            else:
+                sys.stderr.write(f"Error on line {idx}: {e}\n")
+            return 1
 
-        if len(hits) < FEW_RESULTS_THRESHOLD:
+        # A3: 拼字建議依全量召回數判斷，避免因 --top-k 截斷而產生額外延遲
+        if len(all_hits) < FEW_RESULTS_THRESHOLD:
             for word, suggs in suggest_spelling_corrections(q, reader, pre):
                 sys.stderr.write(f"Did you mean for '{word}': {', '.join(suggs)}?\n")
 
+        hits = all_hits[:args.top_k] if args.top_k is not None else all_hits
         formatted = format_hits(hits)
         if args.output_dir:
             out_path = Path(args.output_dir) / f"query_{idx}.txt"

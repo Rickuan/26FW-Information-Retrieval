@@ -9,6 +9,7 @@ SMART 的 lnc／ltc 建置在暫存目錄（symlink 指向真實 index 來源檔
 """
 from __future__ import annotations
 
+from array import array
 import csv
 import hashlib
 import json
@@ -124,17 +125,33 @@ def _build_equivalence():
     try:
         build_norms(tmp, "ltc")
         sha_default = sha256_of(tmp / "doc_norms.bin")
+        arr_default = array("d")
+        with (tmp / "doc_norms.bin").open("rb") as f:
+            arr_default.fromfile(f, N)
+
         (tmp / "doc_norms.bin").unlink()
         subprocess.run([sys.executable, str(SRC / "build_norms.py"), "--index-dir", str(tmp),
                         "--scheme", "ltc"], check=True, capture_output=True)
         sha_cli = sha256_of(tmp / "doc_norms.bin")
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
-    ok = sha_default == sha_cli == core_sha
-    return ok, f"api={sha_default[:12]} cli={sha_cli[:12]} core={core_sha[:12]}"
+
+    # 1. 同一台機器上 API 與 CLI 建置結果逐 byte 相同
+    same_machine_ok = (sha_default == sha_cli)
+
+    # 2. 與 index 核心檔案比對：不同平台 libm (math.log10/sqrt) 可能差 1 ulp，故比對數值容許 1e-12 誤差
+    core_arr = array("d")
+    with (INDEX / "doc_norms.bin").open("rb") as f:
+        core_arr.fromfile(f, N)
+
+    max_diff = max(abs(a - b) for a, b in zip(arr_default, core_arr))
+    core_close = max_diff < 1e-12
+
+    ok = same_machine_ok and core_close
+    return ok, f"api==cli: {same_machine_ok} (sha={sha_default[:8]}), max_diff vs core: {max_diff:.2e} (tol=1e-12)"
 
 
-results.append(run("API 預設、CLI --scheme ltc、核心檔案的 sha256 相同", _build_equivalence))
+results.append(run("API 預設 vs CLI --scheme ltc 逐 byte 相同，且與核心檔案數值吻合 (誤差 < 1e-12)", _build_equivalence))
 
 # ===========================================================================
 section("get_norms('lnc')：獨立路徑對照與 meta 核對")

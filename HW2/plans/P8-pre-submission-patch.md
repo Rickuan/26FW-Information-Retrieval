@@ -17,13 +17,13 @@
 
 ## 雙人分工與工作流 Checklist
 
-### 👨‍💻 Track 1: 程式修復與輸出產物 (分支: `fix/tie-breaking-and-cli-polish`)
-- [ ] **A1. 排序鍵精度修正** (`HW2/src/rank.py`)：排序鍵改為 `(-round(score, 6), doc)`，消滅 4 筆 query 的 803 處逆序。
-- [ ] **A2. CLI 缺檔防呆** (`HW2/src/search.py`)：`main()` 捕捉 `FileNotFoundError` 並提示重建指令。
-- [ ] **A3. 拼字建議時機優化** (`HW2/src/search.py`)：`len(hits) < FEW_RESULTS_THRESHOLD` 移至 `top_k` 截斷前評估。
-- [ ] **A5. 跨機器測試容差** (`HW2/tests/t2_bonus.test.py`)：`core_sha` 比對改為 1e-12 數值誤差容忍。
-- [ ] **單元測試驗證**：執行 `uv run python -m unittest` 與 `HW2/tests/*.py`，確保全數通過。
-- [ ] **A4. 重新產出範例輸出** (`HW2/output/`)：執行 `--queries HW2/queries.txt --output-dir HW2/output`，驗證同分 docID 嚴格遞增。
+### 👨‍💻 Track 1: 程式修復與輸出產物 (分支: `patch/HW2-feature-patch`，見 `.done.P8a-code-and-output-patch.md`)
+- [x] **A1. 排序鍵精度修正** (`HW2/src/rank.py`)：排序鍵改為 `(-round(score, 6), doc)`，消滅 4 筆 query 的 803 處逆序。
+- [x] **A2. CLI 缺檔防呆** (`HW2/src/search.py`)：`main()` 捕捉 `FileNotFoundError` 並提示重建指令。
+- [x] **A3. 拼字建議時機優化** (`HW2/src/search.py`)：`len(all_hits) < FEW_RESULTS_THRESHOLD` 移至 `top_k` 截斷前評估。
+- [x] **A5. 跨機器測試容差** (`HW2/tests/t2_bonus.test.py`)：`core_sha` 比對改為 1e-12 數值誤差容忍。
+- [x] **單元測試驗證**：全量 12 套測試皆全數通過。
+- [x] **A4. 重新產出範例輸出** (`HW2/output/`)：執行 `--queries HW2/queries.txt --output-dir HW2/output`，驗證同分 docID 嚴格遞增（0 逆序）。
 
 ### 📝 Track 2: 報告校正與 TA 執行防呆 (分支: `docs/readme-correction`)
 - [ ] **B1. 索引檔案清單校正** (`HW2/README.md`)：補上 `doc_norms.bin`、`champions.r50.*`，移除 `dictionary.txt`，註明請直接使用附檔。
