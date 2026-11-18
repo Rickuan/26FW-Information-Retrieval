@@ -10,7 +10,7 @@
 > 1. **115598022 顏睿寬**：VSM 排序引擎 (`rank.py`)、CLI 介面與輸出管線 (`search.py`)、Skip 指標加速與布林求值 (`skip_builder.py`, `boolean.py`)、端到端測試套件
 > 2. **115598067 施宥丞**：Index Reader 與快取 (`writer.py`)、權重計算與 Norms 預算腳本 (`weighting.py`, `build_norms.py`)、AST 查詢解析與短語/鄰近比對 (`parser.py`, `positional.py`)、原字詞彙層與拼字建議 (`surface.py`, `spelling.py`)
 > 3. **共同負責**：架構設計與演算法選型、實驗設計、報告撰寫、系統整合與驗證
-> 4. **GitHub Repo**: https://github.com/Rickuan/26FW-Information-Retrieval，查看最新 Release
+> 4. **GitHub Repo**: https://github.com/Rickuan/26FW-Information-Retrieval ，查看最新 Release
 
 ---
 
