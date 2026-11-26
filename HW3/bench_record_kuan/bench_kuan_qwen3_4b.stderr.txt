@@ -1,0 +1,25 @@
+[bench] collecting hardware info
+[bench] ollama stop qwen3:4b -> rc=0 ⠙
+[bench] embed warmup batch (n=64)
+[bench] ollama ps:
+NAME                     ID              SIZE      PROCESSOR    CONTEXT    RUNNER      UNTIL              
+embeddinggemma:latest    85462619ee72    685 MB    100% GPU     2048       llamacpp    4 minutes from now
+[bench] embed batch 2/4
+[bench] embed batch 3/4
+[bench] embed batch 4/4
+[bench] embed: 192 passages in 16.87s -> 11.38 p/s
+[bench] ollama stop embeddinggemma -> rc=0 
+[bench] ollama stop qwen3:4b -> rc=0 
+[bench] ollama ps:
+NAME    ID    SIZE    PROCESSOR    CONTEXT    RUNNER    UNTIL
+[bench] llm warmup (seed=1000)
+[bench] ollama ps:
+NAME        ID              SIZE      PROCESSOR    CONTEXT    RUNNER      UNTIL              
+qwen3:4b    359d7dd4bcda    3.2 GB    100% GPU     8192       llamacpp    4 minutes from now
+[bench] llm run 1/3 (seed=1001)
+[bench] llm run 1: {"seed": 1001, "total_sec": 25.494, "load_sec": 0.032, "prompt_eval_count": 1885, "prompt_eval_sec": 10.075, "prompt_tokens_per_sec": 187.09, "eval_count": 268, "eval_sec": 15.172, "tokens_per_sec": 17.66, "think_leak": false, "answer_preview": "Let me carefully read through the provided documents to find information about the Lakeside Music Festival and its attendance numbers.\n\nI see that Document 3 is about the Lakeside Festival. Let me che"}
+[bench] llm run 2/3 (seed=1002)
+[bench] llm run 2: {"seed": 1002, "total_sec": 27.092, "load_sec": 0.076, "prompt_eval_count": 1886, "prompt_eval_sec": 10.081, "prompt_tokens_per_sec": 187.08, "eval_count": 300, "eval_sec": 16.718, "tokens_per_sec": 17.94, "think_leak": false, "answer_preview": "Let me carefully read through the provided documents to find information about the Lakeside Music Festival and its attendance numbers.\n\nI see that Document 3 is titled \"Lakeside Festival\" and contains"}
+[bench] llm run 3/3 (seed=1003)
+[bench] llm run 3: {"seed": 1003, "total_sec": 27.326, "load_sec": 0.025, "prompt_eval_count": 1888, "prompt_eval_sec": 10.113, "prompt_tokens_per_sec": 186.7, "eval_count": 300, "eval_sec": 16.984, "tokens_per_sec": 17.66, "think_leak": false, "answer_preview": "Let me carefully read through the provided documents to find information about the Lakeside Music Festival and its attendance numbers.\n\nI see that Document 3 is titled \"Lakeside Festival\" and contains"}
+[bench] wrote /Users/kuan/Desktop/26FW-Information-Retrieval/HW3/tools/bench_results/bench_kuan_qwen3_4b.json
