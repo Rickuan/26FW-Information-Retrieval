@@ -37,9 +37,9 @@ output_dir = "output"
 [[inject.tokens]]
 student_id = "115598067"
 sentence = "The IR HW3 verification code 115598067 is registered by team member A."
-target_trec_ids = []   # 固定 3 篇
+target_trec_ids = ["clueweb09-en0000-04-00019", "clueweb09-en0000-04-15079", "clueweb09-en0000-04-30250"]   # 固定 3 篇
 
 [[inject.tokens]]
-student_id = "<學號>"
-sentence = "The IR HW3 verification code <學號> is registered by team member B."
-target_trec_ids = []
+student_id = "115598022"
+sentence = "The IR HW3 verification code 115598022 is registered by team member B."
+target_trec_ids = ["clueweb09-en0000-04-00018", "clueweb09-en0000-04-15051", "clueweb09-en0000-04-30233"]
