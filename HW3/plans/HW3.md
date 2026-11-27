@@ -79,11 +79,12 @@ HW3/                         # 獨立 uv 專案，所有指令在此目錄執行
 │       ├── hw_bridge.py     # 使用 hwlib 的唯一位置                 (A)
 │       ├── build.py         # 一鍵重建所有產物                      (A)
 │       ├── embed.py         # 帶前綴的 Embeddings 類別（唯一入口）  (A)
+│       ├── vectorstore.py   # FAISS 組裝與 load_vectorstore（2.5）  (A)
 │       ├── lexical.py       # LexicalRetriever                      (A)
 │       ├── fusion.py        # RRF + HybridRetriever                 (A)
 │       ├── retrieve.py      # 對外統一介面 retrieve()               (A)
-│       ├── docstore.py      # SQLite 存取                           (B)
-│       ├── passages.py      # 切 passage                            (B)
+│       ├── docstore.py      # SQLite 存取                           (A)
+│       ├── passages.py      # 切 passage                            (A)
 │       ├── semantic.py      # SemanticRetriever（查詢端）           (B)
 │       ├── llm.py           # ChatOllama 建立                       (B)
 │       ├── prompt.py        # Prompt 模板與 chain                   (B)
@@ -104,6 +105,7 @@ HW3/                         # 獨立 uv 專案，所有指令在此目錄執行
 
 - `.gitignore` 要包含 `HW3/config.local.toml`、`HW3/store/`、`HW3/fixtures/`、`HW3/scratch/`；`dataset/`、`index/`、`output/`、`*.warc` 已由根目錄的通用規則排除。
 - bench 工具放在獨立分支 `feat/hw3-bench`，不合併進 main；main 上的 `tools/` 只有 `inject_warc.py`。
+- `docstore.py`、`passages.py` 改由 A 負責；新增 `vectorstore.py`（A），理由見 2.5。
 （依 A1 / 討論修正）
 
 ### 1.3 config.toml（初版）
@@ -166,7 +168,7 @@ target_trec_ids = []
   - `paths(False)` = `HW3/<相對路徑>`；`paths(True)` = `HW3/<fixtures_dir>/<相對路徑>`（`fixtures_dir` 本身不變）。兩套都由同一份相對路徑計算，不會出現 `fixtures/fixtures/...`。
   - `[paths]` 的值必須是 `HW3/` 底下的相對路徑，而且 `fixtures_dir` 以外的路徑不得位於 `fixtures_dir` 之內，否則 raise `ConfigError`。
   - 與工作目錄無關；不跟隨 symlink。
-- **建置完成檢查**：`rag.config.require_build_done(build_meta_path) -> dict` 確認 build_meta 檔案存在且 `status == "done"`（呼叫端傳入 `paths(...)["build_meta"]`，檔名不寫死），否則 raise `BuildNotDoneError`，訊息提示重新執行 build（`status` 為 `"in_progress"` 時說明上次建置未完成）；通過時回傳 build_meta 內容。lexical、semantic、eval 啟動時都必須呼叫（2.6、3.3、3.5）。
+- **建置完成檢查**：`rag.config.require_build_done(build_meta_path) -> dict` 確認 build_meta 檔案存在且 `status == "done"`（呼叫端傳入 `paths(...)["build_meta"]`，檔名不寫死），否則 raise `BuildNotDoneError`，訊息提示重新執行 build（`status` 為 `"in_progress"` 時說明上次建置未完成）；通過時回傳 build_meta 內容。lexical、eval 啟動時都必須呼叫（2.6、3.5）；semantic 透過 `load_vectorstore` 呼叫（2.5、3.3）。
 - 前綴字串要原樣保留，包括 `|` 兩側的空白和結尾的空白。`langchain-ollama` 會把文字原樣送出，所以前綴一律由 `embed.py` 加上。
 - embeddinggemma 的輸入上限是 2048 tokens，300 字的 passage 在範圍內。
 （依 A1 / 討論修正）
@@ -293,21 +295,23 @@ def retrieve(query: str, k: int | None = None,
 
 | A：建置與詞彙線 | B：查詢與生成 |
 |---|---|
-| `config`、`hw_bridge`、`hwlib`（1.1、2.1） | `docstore`、`passages`（2.4） |
-| 重建索引（2.3） | `semantic`（查詢端，含模型一致性檢查，3.3） |
-| `embed.py` 與 embedding、FAISS 建置（2.5） | LLM、prompt（3.1、3.2） |
-| `lexical`（2.6） | CLI（3.4） |
-| `fusion`、`retrieve`、`build.py`（2.7、2.8） | `evaluate`（3.5）、README 與打包（3.7） |
+| `config`、`hw_bridge`、`hwlib`（1.1、2.1） | LLM、prompt（3.1、3.2） |
+| 埋入 WARC（`tools/inject_warc.py`，1.5、2.2） | CLI（3.4） |
+| 重建索引（2.3） | `semantic`（查詢端：查詢、依 docid 去重、補 metadata，3.3） |
+| `docstore`、`passages`（2.4） | `evaluate`（3.5）、README 與打包（3.7） |
+| `embed.py`、`vectorstore.py`（含 `load_vectorstore`）、embedding、FAISS 建置（2.5） | |
+| `lexical`（2.6） | |
+| `fusion`、`retrieve`、`build.py`（2.7、2.8） | |
 
-- 埋特殊 token（1.5、2.2）不再是程式工作：每位成員各自挑選目標並填入 `[[inject.tokens]]`；WARC 的修改由 A 統一進行，token 題的 `gold_docids` 也由 A 填寫。
+- 埋特殊 token（1.5、2.2）：每位成員各自挑選目標並填入 `[[inject.tokens]]`；WARC 由 A 以 `tools/inject_warc.py` 統一產生，token 題的 `gold_docids` 也由 A 填寫。
+- 向量庫的載入（含建置完成檢查、模型一致性檢查、`DistanceStrategy`）由 A 的 `load_vectorstore` 負責；B 的 `semantic` 只負責查詢端的邏輯。
 
 交接順序：
-1. A 交出 `hw_bridge`（含 `hwlib`、`config`）（A1 已完成）
-2. 每位成員填好自己的 `[[inject.tokens]]`；由 A 產生 `dataset/04_injected.warc`、完成 1.5 的驗收，並填寫 `testset.jsonl` 的 token 題 `gold_docids`
-3. B 交出 `docstore.py`、`passages.py` 及其單元測試（**第一優先**）。fixtures 不是交付項目：任何人需要時，自行以 `main.py build --limit N` 產生（見 2.8）
-4. 兩人並行開發：A 的 `fusion` 先接假資料寫好；B 的 CLI 先接 `fake_retrieve()`
-5. A 完成全量建置（`index/`、`store/`）
-6. 整合
+1. A 完成 `hwlib`、`config`、`hw_bridge`（已完成，A1）與 inject（已完成：`dataset/04_injected.warc`、1.5 的驗收、token 題的 `gold_docids`）
+2. A 完成 `docstore`、`passages`、`embed.py`、`load_vectorstore`、`build.py`，產出包含向量庫的 fixtures（`main.py build --limit N`，見 2.8；fixtures 不進版控，B 在本機以同一指令自行產生）
+3. B 在第 2 步完成前，以 `fake_retrieve()` 開發 LLM、prompt、CLI；fixtures 可以產出後開發 `semantic`
+4. B 交出 `semantic`，A 接上 `fusion` 與 `retrieve`（`fusion` 可先接假資料寫好）
+5. A 完成全量建置（`index/`、`store/`）；整合
 
 （依 A1 / 討論修正）
 
@@ -315,7 +319,7 @@ def retrieve(query: str, k: int | None = None,
 
 ## 2. 建置期：資料管線、索引、embedding 與詞彙檢索
 
-本節除 2.2（手動進行，分工見 1.7）與 2.4（B）外由 A 負責。建置期產物統一由 `main.py build` 產生；`04_injected.warc` 例外，是手動產生的輸入。（依 A1 / 討論修正）
+本節全部由 A 負責（2.2 的目標挑選由各成員進行，分工見 1.7）。建置期產物統一由 `main.py build` 產生；`04_injected.warc` 例外，是建置前先以 `tools/inject_warc.py` 產生的輸入。B 在建置期唯一使用的介面是 2.5 的 `load_vectorstore` 與 2.4 的 docstore 讀取函式。（依 A1 / 討論修正）
 
 ### 2.1 hwlib 橋接（`rag/hw_bridge.py`）
 對外只暴露下列函式（`[VERIFY-01]`–`[VERIFY-10]`）：
@@ -409,18 +413,19 @@ class Ranker:
 - 耗時參考：全量索引約 8.5–9 分鐘（A1 實測 517 秒）、峰值記憶體約 1.0 GB；norms 約 15 秒。
 （依 VERIFY-01、05、07、09 修正）（依 A1 / 討論修正）
 
-### 2.4 Doc store 與 passage（`rag/docstore.py`、`rag/passages.py`）（B）
+### 2.4 Doc store 與 passage（`rag/docstore.py`、`rag/passages.py`）（A）
 - `docs` 表：`docid`、`trec_id`、`url`、`text` 直接取自 `hw_bridge.iter_documents()`；寫入後 assert 文件數與 `doc_map.json` 的筆數一致。
 - `passages` 表：清理後文字以空白切字，每段 `passage_words` 字、步長 `passage_stride`；少於 30 字的文件整篇當一段，空文件跳過。
-- 存取函式：`get_doc(docid)`、`get_passage(pid)`、`get_passages_by_doc(docid)`。
-- 由 `build.py` 的 `docstore` 階段呼叫（A 負責串接）。
-- **交付項目**（交接順序第 3 步，第一優先）：`docstore.py`、`passages.py` 及其單元測試。
-- **fixtures 不是交付項目、不進版控**：任何人需要時，自行用 `main.py build --limit N` 產出語料**前 N 篇**的產物（N 預設 200，見 2.8）。
+- 存取函式：`get_doc(docid)`、`get_passage(pid)`、`get_passages_by_doc(docid)`；介面細節見 `plans/A2-docstore-passages.md`。
+- 由 `build.py` 的 `docstore` 階段呼叫。
+- **使用者**：A 的 `lexical`（挑最佳 passage）、B 的 `semantic`（補 `trec_id`、`url`）。
+- **交接**：屬於交接順序第 2 步，與 `embed.py`、`load_vectorstore`、`build.py` 一起完成後，產出包含向量庫的 fixtures。
+- **fixtures 不進版控**：需要時以 `main.py build --limit N` 產出語料**前 N 篇**的產物（N 預設 200，見 2.8）。
   - 只能取前 N 篇，不能挑任意子集，因為 2.3 的連續性檢查會擋下。
   - 依 1.5 的規則，每個學號至少有一篇在 fixtures 中。測試 fixtures 時，`gold_docids` 要先過濾成 docid < N 的那幾篇。
 （依 VERIFY-01、VERIFY-09 修正）（依 A1 / 討論修正）
 
-### 2.5 Embedding（`rag/embed.py` + `build.py` 第二階段）
+### 2.5 Embedding 與向量庫（`rag/embed.py`、`rag/vectorstore.py` + `build.py` 第二階段）
 - `embed.py` 定義 `PrefixedOllamaEmbeddings(langchain_core.embeddings.Embeddings)`：
   - `embed_query(text)`：加 `query_prefix`
   - `embed_documents(texts)`：加 `doc_prefix`
@@ -430,13 +435,13 @@ class Ranker:
   - 建置時：預設使用 GPU。
   - 查詢時：`num_gpu=0`，embedding 改用 CPU，避免和 LLM 搶 VRAM（已實測兩者同時載入 GPU 會讓速度慢約 20 倍）。
   - `OllamaEmbeddings` 是否支援 `num_gpu`，以及查詢模式下 embedding / LLM 實際的 CPU / GPU 分配，見 `[VERIFY-15]`（待查，實作 `embed.py` 時查證）。（依 A1 / 討論修正）
-- B 的 `semantic` 只能透過 `embed.py`（查詢模式）轉換 query。
+- B 的 `semantic` 不自行建立 embeddings：query 由 `load_vectorstore` 回傳的向量庫內含的 `PrefixedOllamaEmbeddings`（查詢模式）轉換（見下方 `load_vectorstore`）。
 - **embedding 階段**：
   - 由 `build.py` 依 `batch_size` 切批 embed 所有 passage。
   - 每批結果存成 checkpoint（`embed_ckpt_dir/*.npy`，內容是向量，以及該批的 pid 範圍）。
   - **中斷後可從最後一批續跑**。checkpoint 目錄另存一份 `embed_model`、前綴、`dim`；與目前 config 不同時清空 checkpoint 重來。
-- **組裝 vectorstore（逐批載入，不一次讀完）**：
-  1. 匯入：`from langchain_community.vectorstores import FAISS`，以及 `from langchain_community.vectorstores.utils import DistanceStrategy`。
+- **組裝 vectorstore（逐批載入，不一次讀完；放在 `rag/vectorstore.py`，由 `build.py` 呼叫）**：
+  1. 匯入（只在 `rag/vectorstore.py` 出現）：`from langchain_community.vectorstores import FAISS`，以及 `from langchain_community.vectorstores.utils import DistanceStrategy`。
      - **不可以**寫成 `from langchain_community.vectorstores import DistanceStrategy`。那會拿到 kinetica 的同名 enum（值為 `"inner"`），FAISS 比對不到，會在不報錯的情況下改建 `IndexFlatL2`。
   2. 只載入**第一個** checkpoint，呼叫 `vs = FAISS.from_embeddings(text_embeddings=[(text, vec), ...], embedding=PrefixedOllamaEmbeddings(...), metadatas=[{"pid": .., "docid": ..}, ...], ids=[str(pid), ...], distance_strategy=DistanceStrategy.MAX_INNER_PRODUCT)`。
   3. assert `isinstance(vs.index, faiss.IndexFlatIP)`。
@@ -444,7 +449,21 @@ class Ranker:
   5. 全部加入後 assert `vs.index.ntotal == n_passages`，再呼叫 `vs.save_local(vectorstore_dir)`。
   - 不要全部讀完後才一次呼叫 `from_embeddings`：12 萬 × 768 個 Python float 大約要 3 GB 記憶體。
   - 向量已經由 `embed.py` normalize 過，**不要**傳 `normalize_L2=True`。在內積模式下它只會發出警告。
-（依 VERIFY-11、VERIFY-12 修正）
+- **載入向量庫（`rag/vectorstore.py` 的 `load_vectorstore`，A 提供給 B 的 `semantic` 使用）**
+  ```python
+  def load_vectorstore(fixtures: bool) -> FAISS   # semantic 傳入 cfg["runtime"]["use_fixtures"]
+  ```
+  1. `p = paths(fixtures)`；`meta = require_build_done(p["build_meta"])`，建置未完成就 raise `BuildNotDoneError`（1.3）。
+  2. **模型一致性檢查**：`meta` 的 `embed_model`、`query_prefix`、`doc_prefix`、`dim` 任一項與 config 的 `[embed]` 不一致，就 raise `EmbedMismatchError`（定義在 `vectorstore.py`），訊息列出不一致的欄位並提示 `build --force`。不檢查就繼續的話，結果會錯亂但不會報錯。
+  3. `FAISS.load_local(p["vectorstore_dir"], PrefixedOllamaEmbeddings(查詢模式), allow_dangerous_deserialization=True, distance_strategy=DistanceStrategy.MAX_INNER_PRODUCT)`（`[VERIFY-12]`）。
+     - `load_local` **不會**保存 `distance_strategy`，必須再傳一次；沒傳時查詢會以 L2 的方式解讀分數。
+     - `DistanceStrategy` 必須從 `langchain_community.vectorstores.utils` 匯入（見上方組裝步驟 1 的匯入陷阱）。
+  4. assert `isinstance(vs.index, faiss.IndexFlatIP)`，且 `vs.index.d == config 的 dim`；回傳 `vs`。
+- **為什麼新增 `rag/vectorstore.py`，而不是放在 `embed.py`**：
+  - `embed.py` 的單元測試（前綴，1.6-7）只需要 `langchain_core`；放在一起會讓測試必須匯入 `faiss` 與 `langchain_community`。
+  - 組裝（建置端）與載入（查詢端）共用 `DistanceStrategy` 的匯入與 `IndexFlatIP` 的檢查，放在同一個模組，匯入陷阱只需要處理一次。
+  - `embed.py` 維持「帶前綴的 Embeddings 類別」單一職責（1.6-4）。
+（依 VERIFY-11、VERIFY-12 修正）（依討論修正）
 
 ### 2.6 詞彙檢索（`rag/lexical.py`）
 - `LexicalRetriever(BaseRetriever)`，`_get_relevant_documents(query)`：
@@ -530,18 +549,14 @@ Question: <question>
 
 ### 3.3 語意檢索（`rag/semantic.py`）
 - `SemanticRetriever(BaseRetriever)`：
-  0. **建置完成檢查**：路徑取自 `paths(cfg["runtime"]["use_fixtures"])`；啟動時先呼叫 `require_build_done(paths(...)["build_meta"])`，建置未完成就直接報錯（1.3）。
-  1. **模型一致性檢查**：使用 `require_build_done` 回傳的 build_meta；若 `embed_model`、`query_prefix`、`doc_prefix`、`dim` 任一項與 config 不一致，**直接 raise 錯誤並停止**（否則結果會錯亂但不會報錯）
-  2. 載入：`FAISS.load_local(vectorstore_dir, PrefixedOllamaEmbeddings(查詢模式), allow_dangerous_deserialization=True, distance_strategy=DistanceStrategy.MAX_INNER_PRODUCT)`（`[VERIFY-12]`）
-     - query 只能透過 `embed.py` 轉換（見 2.5），不得自行建立 `OllamaEmbeddings`。
-     - `load_local` **不會**保存 `distance_strategy`，必須再傳一次。`DistanceStrategy` 的匯入方式見 2.5。
-     - 載入後 assert `isinstance(vs.index, faiss.IndexFlatIP)`。
-  3. `similarity_search_with_score(query, k=k_each * 3)`
+  1. **啟動時取得向量庫**：`vs = load_vectorstore(cfg["runtime"]["use_fixtures"])`（A 提供，見 2.5）。建置完成檢查、模型一致性檢查、`DistanceStrategy`、`IndexFlatIP` 都已在其中處理，`semantic` 不重複做，也不自行呼叫 `FAISS.load_local`、建立 `OllamaEmbeddings` 或匯入 `DistanceStrategy`。docstore 以同一個 `paths(...)["docstore"]` 開啟。
+  2. `vs.similarity_search_with_score(query, k=k_each * 3)`
      - 分數是內積，也就是 cosine，**越大越相似**，結果已經依遞減排序。
      - 原始碼 docstring 寫的「L2 distance, lower is better」不適用於這裡。
      - 分數型別是 `numpy.float32`，要轉成 `float()`。
-  4. 同一 docid 只保留分數最好的 passage，取前 `k_each` 篇
-  5. 從 docstore 補上 `trec_id`、`url`，依 1.4 的 metadata 格式輸出
+  3. 同一 docid 只保留分數最好的 passage，取前 `k_each` 篇
+  4. 以 docstore 的 `get_doc(docid)` 補上 `trec_id`、`url`，依 1.4 的 metadata 格式組成 `Document` 輸出
+- B 的責任範圍：查詢、依 docid 去重、補 `trec_id` 與 `url`、組成 metadata；向量庫的載入細節屬於 A（2.5）。
 （依 VERIFY-12 修正）（依討論修正）
 
 ### 3.4 CLI（`main.py query` → `rag/cli.py`）
