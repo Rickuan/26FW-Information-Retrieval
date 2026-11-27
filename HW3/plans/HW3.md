@@ -89,10 +89,12 @@ HW3/                         # 獨立 uv 專案，所有指令在此目錄執行
 │       ├── prompt.py        # Prompt 模板與 chain                   (B)
 │       ├── cli.py           # query 子指令                          (B)
 │       └── evaluate.py      # eval 子指令                           (B)
+├── tools/
+│   └── inject_warc.py       # 依 [[inject.tokens]] 從 04.warc 產生 04_injected.warc（見 2.2）(A)
 ├── eval/
 │   └── testset.jsonl        # 測試題（雙方共同撰寫，進版控）
 ├── dataset/                 # 使用者放入：04.warc（可用 symlink 指向 HW1/dataset/04.warc）、
-│                            #   04_injected.warc（手動產生，見 2.2）（不進版控）
+│                            #   04_injected.warc（由 tools/inject_warc.py 產生，見 2.2）（不進版控）
 ├── index/                   # 【程式產生】重建後的詞彙索引 + HW2 norms（不進版控）
 ├── store/                   # 【程式產生】docstore.sqlite、vectorstore/、embed_ckpt/、build_meta.json（不進版控）
 ├── fixtures/                # 【程式產生】前 N 篇的建置產物，子結構同正式資料：index/、store/（不進版控，見 2.8）
@@ -101,7 +103,7 @@ HW3/                         # 獨立 uv 專案，所有指令在此目錄執行
 ```
 
 - `.gitignore` 要包含 `HW3/config.local.toml`、`HW3/store/`、`HW3/fixtures/`、`HW3/scratch/`；`dataset/`、`index/`、`output/`、`*.warc` 已由根目錄的通用規則排除。
-- bench 工具放在獨立分支 `feat/hw3-bench`，不合併進 main，因此 main 上沒有 `tools/`。
+- bench 工具放在獨立分支 `feat/hw3-bench`，不合併進 main；main 上的 `tools/` 只有 `inject_warc.py`。
 （依 A1 / 討論修正）
 
 ### 1.3 config.toml（初版）
@@ -383,13 +385,17 @@ class Ranker:
   2. 立刻呼叫一次 `reader.get_norms("ltc")`，讓 HW2 的 sha256 與 N 檢查在載入時就失敗，不要拖到第一次查詢。
 （依 VERIFY-01–07、09、10 修正）
 
-### 2.2 埋特殊 token（手動，取代原本的 `rag/inject.py`）
-- 不寫程式自動產生：沒有 `rag/inject.py`、沒有事前驗證程式，`main.py build` 也沒有 inject 階段。
+### 2.2 埋特殊 token（`tools/inject_warc.py`，取代原本的 `rag/inject.py`）
+- 不放在 `rag/`、不屬於 `main.py build`：build 沒有 inject 階段，直接讀 `injected_warc`。
 - 流程：
   1. 每位成員依 1.5 挑選自己的 3 篇目標並完成確認，把 `student_id`、`sentence`、`target_trec_ids` 填入 `config.toml` 的 `[[inject.tokens]]`。
-  2. 由 A 統一修改 WARC：以 `source_warc` 為底，只修改目標 record，產生唯一一份 `injected_warc`（`dataset/04_injected.warc`）。其他人不另外產生。
-  3. A 執行 1.5 的驗收，並手動把每組埋入的 docid（TREC-ID 尾碼整數，依遞增排序）填入 `eval/testset.jsonl` 對應 token 題的 `gold_docids`。
-- 修改方式的建議（沿用原設計，非強制；結果以 1.5 驗收第 2 項確認）：在目標 HTML 的 `</body>` 前插入 `<p>{句子}</p>`；非目標 record 的 bytes 不動，record 邊界依 `b"WARC/0.18"`（`[VERIFY-03]`）。hwlib 不讀 `Content-Length`，是否更新只影響格式正確性。
+  2. WARC 由 A 以 `tools/inject_warc.py` 依 config 產生（在 `HW3/` 下執行 `uv run python tools/inject_warc.py`）：以 `source_warc` 為底，只修改目標 record，產生唯一一份 `injected_warc`（`dataset/04_injected.warc`）。其他人不另外產生；需要時可用同一指令重新產生，輸出逐位元組相同。
+  3. 工具寫完後自動執行 1.5 的驗收第 1、2 項，以及第 3、4 點的位元組檢查，並印出每組埋入的 docid；A 把它（TREC-ID 尾碼整數，依遞增排序）填入 `eval/testset.jsonl` 對應 token 題的 `gold_docids`。
+- 工具的做法：
+  - 在目標 HTML 最後一個 `</body>`（不分大小寫）前插入 `<p>{句子}</p>`（ASCII）；找不到 `</body>` 就停止，不改插入位置。record 邊界依 `b"WARC/0.18"`（`[VERIFY-03]`）。
+  - WARC 標頭的 `Content-Length` 加上插入的位元組數，HTTP 標頭有 `Content-Length` 時一併加上；只改數字，其他位元組（含換行）不動。hwlib 不讀 `Content-Length`，更新只為格式正確。
+  - 非目標 record 逐位元組相同；目標 record 的大小差 = 插入位元組數 + `Content-Length` 數字增加的位數。
+  - 先寫暫存檔，全部成功後才 `os.replace` 成正式檔名；設定不完整（每組不是恰好 3 篇、學號非純數字等）時不寫任何檔案。
 （依 VERIFY-01、VERIFY-03 修正）（依 A1 / 討論修正）
 
 ### 2.3 重建詞彙索引（`rag/build.py` 的第一階段）
@@ -577,14 +583,14 @@ uv run python src/main.py query --interactive        # 選做：prompt> 互動�
 - 每張截圖要看得到：問題、無 RAG 回答、有 RAG 回答、引用的 Document ID
 
 ### 3.7 README、說明文件與打包
-- `HW3/README.md`（格式比照 HW1/HW2 README）：環境、`uv sync`（在 `HW3/` 下）、NLTK `stopwords` 下載步驟（見 1.1）、`ollama pull` 指令（兩個模型）、Ollama 最低版本、`04.warc` 放置位置、`04_injected.warc` 的產生方式（以 `config.toml` 的 `[[inject.tokens]]` 為準，照 2.2 的手動步驟從 `04.warc` 修改產生；不進版控、不隨繳交附上）、開發說明（1.5 的 `search.py` 檢查需要本機已有 `HW2/index`）、`build` / `query` / `eval` 用法、`config.local.toml` 的用途、系統特色、困難與解決方案
+- `HW3/README.md`（格式比照 HW1/HW2 README）：環境、`uv sync`（在 `HW3/` 下）、NLTK `stopwords` 下載步驟（見 1.1）、`ollama pull` 指令（兩個模型）、Ollama 最低版本、`04.warc` 放置位置、`04_injected.warc` 的產生方式（以 `config.toml` 的 `[[inject.tokens]]` 為準，可用 `tools/inject_warc.py` 從 `04.warc` 重新產生：在 `HW3/` 下執行 `uv run python tools/inject_warc.py`；不進版控、不隨繳交附上）、開發說明（1.5 的 `search.py` 檢查需要本機已有 `HW2/index`）、`build` / `query` / `eval` 用法、`config.local.toml` 的用途、系統特色、困難與解決方案
 - 一頁說明文件（彙整 A 提供的段落）：
   - 主要特色：hybrid retrieval（RRF）、引用來源、無 RAG 對照模式、檢索評估表、可續跑的建置流程
   - 遇到的主要困難
   - 執行環境需求：Python 版本、uv、Ollama 版本、模型名稱與 tag
   - 組員名單與負責部分（依 1.7 列出）
 - 打包：單一壓縮檔，內容是 `HW3/` 目錄。**HW3 是獨立專案（hwlib 已複製進來），不需要包含 HW1/HW2**。**繳交前確認檔名格式**。依大小決定是否附上 `HW3/index/`、`HW3/store/`（HW2 有附完整索引）；不附的話，README 要寫清楚重建指令與預估耗時
-- 最後在乾淨的 clone 上照 README 從頭跑一次，確認可以重現（`04_injected.warc` 依 README 的手動步驟產生）
+- 最後在乾淨的 clone 上照 README 從頭跑一次，確認可以重現（`04_injected.warc` 以 `tools/inject_warc.py` 從 `04.warc` 重新產生）
 （依討論修正）
 
 ---
