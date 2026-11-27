@@ -33,7 +33,7 @@ fixtures_dir = "fixtures"
 output_dir = "output"
 
 # 每位成員一組：學號、句子與 target_trec_ids 由每位成員自行挑選並填入；
-# WARC 由 A 依這份設定統一手動修改，產生 dataset/04_injected.warc（見 plans/HW3.md 2.2）
+# 以 tools/inject_warc.py 依這份設定產生 04_injected.warc
 [[inject.tokens]]
 student_id = "115598067"
 sentence = "The IR HW3 verification code 115598067 is registered by team member A."

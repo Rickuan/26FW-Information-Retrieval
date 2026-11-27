@@ -137,8 +137,11 @@ def preprocess(text: str) -> list[str]:
 # 建置詞彙索引與 norms
 # ---------------------------------------------------------------------------
 
-def _check_docid_contiguous(index_dir) -> None:
-    """規格 2.3：doc_map 的 key 必須恰好是 0..N-1，且 metadata 的 N == len(doc_map)。"""
+def check_docid_contiguous(index_dir) -> None:
+    """規格 2.3：doc_map 的 key 必須恰好是 0..N-1，且 metadata 的 N == len(doc_map)；不成立就 raise ValueError。
+
+    build_lexical_index 寫完後會呼叫；build.py 在跳過 index 階段時也呼叫（每次建置都檢查）。
+    """
     index_dir = Path(index_dir)
     with (index_dir / "doc_map.json").open("r", encoding="utf-8") as f:
         keys = set(json.load(f))
@@ -179,7 +182,7 @@ def build_lexical_index(warc_path, index_dir, limit: int | None = None) -> dict:
         w.write_doc_map(ix)
         w.write_metadata(ix, config=dict(PREPROCESSOR_CONFIG))
         stats = dict(ix.stats)
-    _check_docid_contiguous(index_dir)
+    check_docid_contiguous(index_dir)
     return stats
 
 
