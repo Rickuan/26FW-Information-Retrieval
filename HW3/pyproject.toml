@@ -1,0 +1,17 @@
+[project]
+name = "hw3"
+version = "0.1.0"
+requires-python = ">=3.12"
+dependencies = [
+    "beautifulsoup4==4.15.0",
+    "charset-normalizer==3.5.2",  # 鎖定：bs4 UnicodeDammit 的編碼偵測結果會隨版本改變；3.5.3 會讓 29 篇文件的解碼與 HW2/index 不同
+    "faiss-cpu==1.16.0",
+    "ftfy==6.3.1",
+    "langchain-community==0.4.2",
+    "langchain-core==1.7.2",
+    "langchain-ollama==1.2.0",
+    "lxml==6.1.3",
+    "nltk==3.10.3",
+    "numpy==2.5.4",
+    "spacy==3.8.16",
+]

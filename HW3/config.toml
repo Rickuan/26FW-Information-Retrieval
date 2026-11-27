@@ -1,0 +1,45 @@
+[corpus]
+source_warc = "dataset/04.warc"            # 由使用者自行放入（README 說明）
+injected_warc = "dataset/04_injected.warc"
+
+[llm]
+model = "qwen3:8b"
+temperature = 0
+num_ctx = 8192           # 已實測 qwen3:8b + 8192 可以完整放進 GPU
+disable_thinking = true
+
+[embed]
+model = "embeddinggemma"
+query_prefix = "task: search result | query: "   # model card 的檢索用 query 格式
+doc_prefix = "title: none | text: "              # 沒有標題時固定寫 none
+dim = 768
+batch_size = 64
+
+[retrieval]
+k_each = 20              # 詞彙、語意兩路各取幾篇
+k_final = 5              # 合併後送進 LLM 的篇數
+rrf_k = 60
+passage_words = 300
+passage_stride = 250     # 相鄰 passage 重疊 50 字
+prompt_passage_max_words = 300
+
+[paths]
+index_dir = "index"
+docstore = "store/docstore.sqlite"
+vectorstore_dir = "store/vectorstore"
+embed_ckpt_dir = "store/embed_ckpt"
+build_meta = "store/build_meta.json"
+fixtures_dir = "fixtures"
+output_dir = "output"
+
+# 每位成員一組：學號、句子與 target_trec_ids 由每位成員自行挑選並填入；
+# WARC 由 A 依這份設定統一手動修改，產生 dataset/04_injected.warc（見 plans/HW3.md 2.2）
+[[inject.tokens]]
+student_id = "115598067"
+sentence = "The IR HW3 verification code 115598067 is registered by team member A."
+target_trec_ids = []   # 固定 3 篇
+
+[[inject.tokens]]
+student_id = "<學號>"
+sentence = "The IR HW3 verification code <學號> is registered by team member B."
+target_trec_ids = []

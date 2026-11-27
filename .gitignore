@@ -245,3 +245,7 @@ dataset/
 index/
 
 HW3/tools/bench_results/
+
+HW3/scratch/
+HW3/store/
+HW3/fixtures/
