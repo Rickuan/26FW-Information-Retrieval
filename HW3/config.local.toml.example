@@ -1,0 +1,14 @@
+# 本機覆寫範例：複製成 config.local.toml 後修改（config.local.toml 不進版控）。
+# 逐鍵覆寫 config.toml：表格遞迴合併，其他值整個取代。
+# 不得在此覆寫 [embed]、[paths] 與 [[inject.tokens]]，出現時 rag/config.py 會報錯。
+
+[llm]
+model = "qwen3:1.7b"     # 開發用小模型；最終 prompt 調整一定要換回 qwen3:8b
+
+[retrieval]
+k_final = 2
+
+[runtime]
+# true：query 與 eval 改讀 fixtures（fixtures_dir/<config.toml 中的相對路徑>）。
+# 先用 `uv run python src/main.py build --limit 200` 產生 fixtures；build 不讀這個開關。
+use_fixtures = true

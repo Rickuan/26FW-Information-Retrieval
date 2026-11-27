@@ -35,12 +35,12 @@
 
 | 項目 | 選擇 | 備註 |
 |---|---|---|
-| 語言 / 套件管理 | Python ≥ 3.12 + uv | **HW3 是獨立專案**：`HW3/pyproject.toml` + `HW3/uv.lock`，所有指令都在 `HW3/` 目錄下執行。依賴包含 hwlib 需要的 `beautifulsoup4`、`lxml`、`ftfy`、`nltk`、`spacy`，以及 LangChain 相關套件（版本見 `[VERIFY-14]`） |
+| 語言 / 套件管理 | Python ≥ 3.12 + uv | **HW3 是獨立專案**：`HW3/pyproject.toml` + `HW3/uv.lock`，所有指令都在 `HW3/` 目錄下執行。依賴包含 hwlib 需要的 `beautifulsoup4`、`lxml`、`ftfy`、`nltk`、`spacy`，以及 LangChain 相關套件（版本見 `[VERIFY-14]`）。另鎖定間接依賴 `charset-normalizer==3.5.2`：bs4 的編碼偵測結果會隨它的版本改變，3.5.3 會讓 29 篇文件的解碼與 HW2 索引不同（`[VERIFY-14]`） |
 | LLM 框架 | LangChain：`langchain-core`、`langchain-ollama`、`langchain-community` | 符合投影片建議。**RRF 合併自行實作**，不使用 `EnsembleRetriever`（它依 passage 內容去重，我們需要依 docid 合併） |
 | LLM 執行 | Ollama ≥ v0.11.10 | embeddinggemma 的最低版本需求（`[VERIFY-11]`） |
 | 生成模型 | `qwen3:8b`（預設，最終版本） | tag 寫死在 config，不用 `latest` |
 | 開發用模型 | `qwen3:1.7b`，或 `qwen3:4b-q4_K_M` | 透過 `config.local.toml` 切換（見 1.3）。**不要用預設的 `qwen3:4b`**：它是只能思考的版本，思考模式關不掉。`1.7b` 會捏造文件中沒有的細節，**最終的 prompt 調整一定要在 `qwen3:8b` 上做** |
-| Embedding 模型 | `embeddinggemma` | 備選 `qwen3-embedding:0.6b`。query 與 passage 必須用同一個模型與前綴（`[VERIFY-11]`） |
+| Embedding 模型 | `embeddinggemma` | query 與 passage 必須用同一個模型與前綴（`[VERIFY-11]`） |
 | 向量索引 | LangChain `FAISS` vectorstore（需安裝 `faiss-cpu` 套件） | 向量做 L2 normalize，使用內積（= cosine） |
 | Doc store | SQLite（內建 `sqlite3`） | |
 | WARC 讀取 / HTML 清理 / 前處理 / 索引 | **沿用 HW1/HW2 的實作，複製到 `HW3/src/hwlib/`**（見 2.1） | 不使用 `warcio`（HW1 已確認有 `Content-Length` 誤差問題），也不另外引入 HTML 清理套件。query、passage 評分、索引必須是同一套前處理（stop + stem） |
@@ -48,7 +48,7 @@
 | 合併 | RRF，k = 60 | |
 | 測試 | 標準函式庫 `unittest` | 不新增測試套件，慣例見 1.6 |
 
-**LangChain 路線已實測通過**（`tools/bench.py`）：`OllamaEmbeddings` 搭配自行加上的前綴可正常取得向量；`ChatOllama(reasoning=False)` 可關閉 Qwen3 的思考模式。
+**LangChain 路線已實測通過**（以 bench 工具實測，獨立分支 `feat/hw3-bench`；bench 工具不合併進 main）：`OllamaEmbeddings` 搭配自行加上的前綴可正常取得向量；`ChatOllama(reasoning=False)` 可關閉 Qwen3 的思考模式。
 
 **hwlib（HW1/HW2 程式碼的副本）**
 - 從 `HW2/src` 複製到 `HW3/src/hwlib/`，取代原本「從 HW2/src 匯入」的做法。HW2/src 的 loader、cleaner、indexer 與 HW1 逐位元組相同；tokenizer、writer 是 HW1 的超集，建置產物已實測完全相同（`[VERIFY-10]`）。
@@ -56,8 +56,12 @@
 - **只修改 import 語句**：模組之間的扁平絕對匯入（`from warc import ...`）改成套件內的相對匯入（`from .warc import ...`），其他程式碼一律不動。
 - `hwlib/README.md` 記錄：來源路徑與 commit hash、複製的檔案清單、每個檔案修改了哪幾行 import。
 - 外部資料檔：`tokenizer` 使用 `spacy.blank("en")`，**不需要**下載 spaCy 模型；停用詞需要 NLTK 的 `stopwords` 資料。程式第一次執行時會自動下載，但 README 仍要寫下手動步驟：`uv run python -c "import nltk; nltk.download('stopwords')"`。
+- 已完成（A1）：實際修改了 6 個檔案共 12 行 import（含 `rank.py` 位於 `if TYPE_CHECKING:` 區塊內的 `from writer import IndexReader`）；以 hwlib 全量重建的 `lexicon.tsv`、`postings.bin`、`doc_map.json` 與 `HW2/index` 逐位元組相同。
+（依 A1 / 討論修正）
 
 ### 1.2 目錄結構
+
+標記【程式產生】的資料夾不預先建立、不放進版控，由需要它的程式在執行時建立。
 
 ```
 HW3/                         # 獨立 uv 專案，所有指令在此目錄執行
@@ -68,11 +72,11 @@ HW3/                         # 獨立 uv 專案，所有指令在此目錄執行
 ├── src/
 │   ├── main.py              # 統一入口：build / query / eval 子指令
 │   ├── hwlib/               # HW1/HW2 程式碼副本（只改 import，見 1.1）(A)
-│   │   └── README.md        # 來源 commit 與 import 修改紀錄
+│   │   └── README.md        # 來源 commit、import 修改紀錄、依賴鎖定理由
 │   └── rag/                 # 每個模組旁邊放 <模組>.test.py（unittest，範圍見 1.6）
+│       ├── __init__.py      # 空檔
 │       ├── config.py        # 讀 config.toml + config.local.toml    (A)
 │       ├── hw_bridge.py     # 使用 hwlib 的唯一位置                 (A)
-│       ├── inject.py        # 埋特殊 token                          (A)
 │       ├── build.py         # 一鍵重建所有產物                      (A)
 │       ├── embed.py         # 帶前綴的 Embeddings 類別（唯一入口）  (A)
 │       ├── lexical.py       # LexicalRetriever                      (A)
@@ -85,19 +89,20 @@ HW3/                         # 獨立 uv 專案，所有指令在此目錄執行
 │       ├── prompt.py        # Prompt 模板與 chain                   (B)
 │       ├── cli.py           # query 子指令                          (B)
 │       └── evaluate.py      # eval 子指令                           (B)
-├── tools/
-│   ├── bench.py             # 硬體試跑工具（embedding / LLM 速度）
-│   └── bench_results/       # bench 輸出（不進版控）
-├── fixtures/                # 小型樣本產物（前 N 篇，供開發與測試）
 ├── eval/
-│   └── testset.jsonl        # 測試題（雙方共同撰寫）
-├── dataset/                 # 04.warc、04_injected.warc（不進版控）
-├── index/                   # 重建後的詞彙索引 + HW2 norms（不進版控）
-├── store/                   # docstore.sqlite、vectorstore/、embed_ckpt/、build_meta.json（不進版控）
-└── output/                  # eval 結果、對照輸出（單數，與 HW2 一致）
+│   └── testset.jsonl        # 測試題（雙方共同撰寫，進版控）
+├── dataset/                 # 使用者放入：04.warc（可用 symlink 指向 HW1/dataset/04.warc）、
+│                            #   04_injected.warc（手動產生，見 2.2）（不進版控）
+├── index/                   # 【程式產生】重建後的詞彙索引 + HW2 norms（不進版控）
+├── store/                   # 【程式產生】docstore.sqlite、vectorstore/、embed_ckpt/、build_meta.json（不進版控）
+├── fixtures/                # 【程式產生】前 N 篇的建置產物，子結構同正式資料：index/、store/（不進版控，見 2.8）
+├── output/                  # 【程式產生】eval 結果、對照輸出（單數，與 HW2 一致）（不進版控）
+└── scratch/                 # 本機驗證用暫存腳本（不進版控）
 ```
 
-- `.gitignore` 要包含 `HW3/config.local.toml`、`HW3/tools/bench_results/`。
+- `.gitignore` 要包含 `HW3/config.local.toml`、`HW3/store/`、`HW3/fixtures/`、`HW3/scratch/`；`dataset/`、`index/`、`output/`、`*.warc` 已由根目錄的通用規則排除。
+- bench 工具放在獨立分支 `feat/hw3-bench`，不合併進 main，因此 main 上沒有 `tools/`。
+（依 A1 / 討論修正）
 
 ### 1.3 config.toml（初版）
 
@@ -138,14 +143,11 @@ build_meta = "store/build_meta.json"
 fixtures_dir = "fixtures"
 output_dir = "output"
 
-[inject]
-baseline_lexicon = "../HW2/index/lexicon.tsv"   # 重建前的 stop+stem 索引，用來檢查 df = 0（見下方待決定事項）
-
-# 每位成員一組；學號與句子由各成員提供，target_trec_ids 由 A 挑選
+# 每位成員一組；學號、句子與 target_trec_ids 都由該成員自行挑選並填入（見 1.5）
 [[inject.tokens]]
 student_id = "<學號>"
 sentence = "The IR HW3 verification code <學號> is registered by team member <姓名>."
-target_trec_ids = []   # 固定 3 篇，由 A 於實作時挑選後填入
+target_trec_ids = []   # 固定 3 篇
 
 [[inject.tokens]]
 student_id = "<學號>"
@@ -153,11 +155,19 @@ sentence = "The IR HW3 verification code <學號> is registered by team member <
 target_trec_ids = []
 ```
 
-- **`config.toml` 是埋入設定的唯一來源**：學號、句子與目標 TREC-ID 都只寫在 `[[inject.tokens]]`。本規格不列出具體的 TREC-ID，程式中也不得另外寫死。
-- **本機覆寫 `config.local.toml`**（不進版控）：存在時，`rag/config.py` 以它逐鍵覆寫 `config.toml`（表格遞迴合併，其他值整個取代）。用途是讓開發者自行改用開發用模型（1.1）、調降 `k_final` 等。不得在覆寫檔中修改 `[embed]` 與 `[[inject.tokens]]`，否則產物會與他人不一致。
+- **`[[inject.tokens]]` 是 `04_injected.warc` 如何產生的唯一紀錄**：學號、句子與目標 TREC-ID 都只寫在這裡。本規格不列出具體的 TREC-ID，程式中也不得另外寫死。WARC 的修改是手動進行的（見 2.2），程式不會依這份設定自動產生 WARC。
+- **本機覆寫 `config.local.toml`**（不進版控）：存在時，`rag/config.py` 以它逐鍵覆寫 `config.toml`（表格遞迴合併，其他值整個取代）。用途是讓開發者自行改用開發用模型（1.1）、調降 `k_final`，以及切換 fixtures（下一點）。不得在覆寫檔中修改 `[embed]`、`[paths]` 與 `[[inject.tokens]]`（前者與後者會讓產物與他人不一致，`[paths]` 會讓切換 fixtures 有兩種方式）；`rag/config.py` 遇到時會 raise `ConfigError`。範例見 `config.local.toml.example`。
+- **切換 fixtures 只有一種方式**：在 `config.local.toml` 設定 `[runtime] use_fixtures = true`（預設 false，不寫在 `config.toml`）。
+  - `query` 與 `eval` 讀到 true 時，所有路徑改為 `fixtures_dir/<config.toml 中的相對路徑>`。
+  - `build` 不讀這個開關：有 `--limit` 時寫到 fixtures 路徑，沒有時寫到正式路徑（2.8）。
+- **路徑解析**：`[corpus]` 的路徑由 `rag/config.py` 以 `HW3/` 為基準解析成絕對路徑。`[paths]` 在設定 dict 中保留 config.toml 的相對路徑字串，絕對路徑一律透過 `rag.config.paths(fixtures: bool) -> dict[str, Path]` 取得：
+  - `paths(False)` = `HW3/<相對路徑>`；`paths(True)` = `HW3/<fixtures_dir>/<相對路徑>`（`fixtures_dir` 本身不變）。兩套都由同一份相對路徑計算，不會出現 `fixtures/fixtures/...`。
+  - `[paths]` 的值必須是 `HW3/` 底下的相對路徑，而且 `fixtures_dir` 以外的路徑不得位於 `fixtures_dir` 之內，否則 raise `ConfigError`。
+  - 與工作目錄無關；不跟隨 symlink。
+- **建置完成檢查**：`rag.config.require_build_done(build_meta_path) -> dict` 確認 build_meta 檔案存在且 `status == "done"`（呼叫端傳入 `paths(...)["build_meta"]`，檔名不寫死），否則 raise `BuildNotDoneError`，訊息提示重新執行 build（`status` 為 `"in_progress"` 時說明上次建置未完成）；通過時回傳 build_meta 內容。lexical、semantic、eval 啟動時都必須呼叫（2.6、3.3、3.5）。
 - 前綴字串要原樣保留，包括 `|` 兩側的空白和結尾的空白。`langchain-ollama` 會把文字原樣送出，所以前綴一律由 `embed.py` 加上。
 - embeddinggemma 的輸入上限是 2048 tokens，300 字的 passage 在範圍內。
-- **待決定**：HW3 是獨立專案，但 `baseline_lexicon` 仍指向 HW2 的索引。需要決定在乾淨 clone 上執行 inject 時，df = 0 檢查要從哪裡取得 baseline。
+（依 A1 / 討論修正）
 
 規模預估（用於檢查建置結果是否合理，非硬性數字）：平均每篇約 870 字，以 300/250 切分，約 **12 萬段 passage**。
 
@@ -189,6 +199,7 @@ CREATE INDEX idx_passages_docid ON passages(docid);
 **`store/build_meta.json`**（只保留下列欄位）
 ```json
 {
+  "status": "in_progress",
   "embed_model": "embeddinggemma",
   "query_prefix": "...", "doc_prefix": "...", "dim": 768,
   "limit": null,
@@ -197,6 +208,8 @@ CREATE INDEX idx_passages_docid ON passages(docid);
 ```
 - `limit` 為 null 代表全量建置，fixtures 則為 N（見 2.8）。
 - `inject_tokens` 是建置時 config 的 `[[inject.tokens]]` 原樣內容。
+- `status`：`"in_progress"` 或 `"done"`。建置一開始就寫入 `"in_progress"`，全部階段完成後改為 `"done"`（見 2.8）。
+（依討論修正）
 
 **檢索結果格式**：所有 retriever 都回傳 LangChain `Document`，`page_content` = passage 文字，`metadata` 固定包含：
 ```python
@@ -236,37 +249,41 @@ def retrieve(query: str, k: int | None = None,
   `The IR HW3 verification code <學號> is registered by team member <姓名>.`
 - 每人埋 **3 篇**，兩人共 6 篇。
 - 設計說明：純數字 token 預期在語意檢索中表現差、在詞彙檢索中命中，正好用來展示 hybrid 的效果。
-- 設定來源：1.3 的 `[[inject.tokens]]`，每位成員一組。
-- **擺放位置**：第 1 篇 docid < 200（落在 fixtures 內）；其餘 2 篇建議放在語料的中段與後段，但不強制。
-- **驗證規則**（inject 執行前檢查，見 2.2；**任何一條不符合，就報錯並停止，不得自動替換目標**）：
+- 設定來源：1.3 的 `[[inject.tokens]]`，每位成員一組；**每位成員自行挑選自己的 3 篇目標**，連同學號、句子填入。
+- **擺放位置**：第 1 篇 docid < 200（落在預設 N = 200 的 fixtures 內）；其餘 2 篇建議放在語料的中段與後段，但不強制。
+- **挑選目標時的確認**（手動執行，不是程式的事前驗證）：
   1. 每組的 `target_trec_ids` 恰好 3 篇。
-  2. 每篇目標都存在於 `source_warc`，HTTP 回應的 Content-Type 為 `text/html`，而且清理後的文字不能是空的。
-  3. `student_id` 在 baseline 索引（`[inject] baseline_lexicon`）中 df = 0：查 `preprocess(student_id)` 的結果，第 1 欄是 term，查不到才算 df = 0。學號是純數字，不會被 stem。
-  4. assert 每組至少一篇 docid < 200（docid = TREC-ID 尾碼整數）。
-- **驗收**：建置完成後用詞彙檢索查詢每個學號，命中的文件必須 = 埋入的文件。
+  2. 用 `hw_bridge.inspect_targets(source_warc, set(target_trec_ids))` 確認：3 篇都在結果中、`content_type == "text/html"`、`cleaned_text` 不是 `None` 也不是空字串。
+  3. 每組至少一篇 `docid < 200`（docid = TREC-ID 尾碼整數，即 `TargetInfo.docid`）。
+  4. 學號原本查不到：在 repo 根目錄執行 `uv run python HW2/src/search.py "<學號>" --index-dir HW2/index`，沒有任何輸出。學號是純數字，不會被 stem（`[VERIFY-04]`）。需要本機已有 `HW2/index`（不進版控，需先依 HW2 README 建置）；HW3 README 的開發說明也要提及。
+- 為什麼只選 `text/html`：`text/plain` 文件沒有 `</body>`，插入的 `<p>` 會留在清理後的文字裡。
+- **WARC 的修改**：由 A 統一進行，只產生一份 `dataset/04_injected.warc`（見 2.2）。
+- **驗收**（A 執行）：
+  1. 用 `hw_bridge.iter_documents` 讀取新 WARC，文件數仍為 34,786，docid 恰為 0..34785。
+  2. 用 `hw_bridge.inspect_targets(injected_warc, 全部 6 篇目標)` 確認每篇的 `cleaned_text` 都包含該組的句子。
+  3. 建置完成後用詞彙檢索查詢每個學號，命中的文件必須 = 埋入的文件。
 - **選做**：把一則資訊拆成 3 部分，分別放進同一組的 3 篇文件，展示 LLM 綜合多篇文件回答的能力。
-- **分工**：目標由 A 依上述規則挑選，填入 config；B 只提供自己的 `student_id` 與 `sentence`。
-（依 VERIFY-04 修正）
+（依 VERIFY-04 修正）（依 A1 / 討論修正）
 
 ### 1.6 共同實作規範（雙方都適用）
 
 1. 不得單方面修改 1.3、1.4 的介面、資料格式、檔名；需要修改時，先更新本文件
 2. 遇到 `[VERIFY-xx]`：以第 6 節的結論為準；新的待查事項查不到時，停下來回報，不要猜測
-3. hwlib 的模組**只能透過 `rag/hw_bridge.py` 使用**；其他檔案不得 import `hwlib`
+3. hwlib 的模組**只能透過 `rag/hw_bridge.py` 使用**；其他檔案不得 import `hwlib`。需要讀取 WARC 中特定文件的 content type 與清理後文字時，使用已提供的 `hw_bridge.inspect_targets(warc_path, trec_ids: set[str]) -> dict[str, TargetInfo]`（`TargetInfo(docid: int, content_type: str, cleaned_text: str | None)`，見 2.1），不要另外讀 WARC（依 A1 / 討論修正）
 4. Embedding 一律使用 `rag/embed.py` 提供的類別；**禁止在其他地方自行建立 `OllamaEmbeddings` 或加前綴**
 5. 所有參數從 config 讀取，程式中不寫死模型名稱、路徑或 k 值
 6. 提示與進度訊息只寫到 `stderr`；回答與結果寫到 `stdout`（與 HW2 一致）。hwlib 函式 print 到 stdout 的輸出，由 `hw_bridge` 轉到 stderr（見 2.1）
-7. 單元測試（`unittest`）**只寫以下四項**，使用 `fixtures/` 或測試內自建的小資料，不依賴全量產物：
+7. 單元測試（`unittest`）**只寫以下三項**，只使用測試程式內自建的小資料，不依賴 `fixtures/`（不進版控，乾淨 clone 上不存在）或全量產物。`fixtures/` 用於手動測試與整合測試：
    - `passages`（切分邊界、短文件、空文件）
    - `fusion`（RRF 分數、同分規則、passage 選擇、sources）
-   - `inject`（驗證規則、插入位置、Content-Length 更新）
    - `embed` 前綴（query / doc 前綴正確加上，不重複加）
    - 檔名：放在被測模組旁邊，命名為 `<模組>.test.py`（例如 `rag/passages.py` → `rag/passages.test.py`），依照 AGENTS.md 的慣例。
    - 寫法：使用 `unittest.TestCase`，檔尾加上 `if __name__ == "__main__": unittest.main()`。
    - 匯入：直接執行測試檔時，`sys.path[0]` 是 `HW3/src/rag/`，所以檔頭要把 `HW3/src` 插入 `sys.path`，之後一律用 `from rag.xxx import ...` 匯入，不可以直接 `import xxx`，否則同一個模組會被載入兩份。這是唯一允許的 `sys.path` 操作。
    - 執行（在 `HW3/` 下）：`uv run python src/rag/passages.test.py`；全部執行用 `for f in src/rag/*.test.py; do uv run python "$f" || break; done`。
    - 不能用 `python -m unittest <路徑>` 或 `unittest discover -p "*.test.py"`：檔名中多了一個 `.`，無法當成模組名稱匯入（已實測，前者報錯，後者找到 0 個測試）。
-   - **待處理**：AGENTS.md 寫的測試指令（`uv run python -m unittest HW1/src/*.test.py`）因上述原因無法執行，也沒有涵蓋 HW3 的獨立專案。實作時再一併修正 AGENTS.md。
+   - **待處理**：AGENTS.md 寫的測試指令（`uv run python -m unittest HW1/src/*.test.py`）因上述原因無法執行，也沒有涵蓋 HW3 的獨立專案。實作時再一併修正 AGENTS.md（A1 時仍未修正）。
+   （依 A1 / 討論修正）
 8. 尚未完成的相依元件，先用介面相同的假實作（例如 `fake_retrieve()`），不得等待
 9. 開發時可以使用小模型 `qwen3:1.7b`（在 `config.local.toml` 設定，見 1.3），最後調整時再換回 `qwen3:8b`
 
@@ -275,36 +292,51 @@ def retrieve(query: str, k: int | None = None,
 | A：建置與詞彙線 | B：查詢與生成 |
 |---|---|
 | `config`、`hw_bridge`、`hwlib`（1.1、2.1） | `docstore`、`passages`（2.4） |
-| `inject`、重建索引（2.2、2.3） | `semantic`（查詢端，含模型一致性檢查，3.3） |
+| 重建索引（2.3） | `semantic`（查詢端，含模型一致性檢查，3.3） |
 | `embed.py` 與 embedding、FAISS 建置（2.5） | LLM、prompt（3.1、3.2） |
 | `lexical`（2.6） | CLI（3.4） |
 | `fusion`、`retrieve`、`build.py`（2.7、2.8） | `evaluate`（3.5）、README 與打包（3.7） |
 
+- 埋特殊 token（1.5、2.2）不再是程式工作：每位成員各自挑選目標並填入 `[[inject.tokens]]`；WARC 的修改由 A 統一進行，token 題的 `gold_docids` 也由 A 填寫。
+
 交接順序：
-1. A 交出 `hw_bridge`（含 `hwlib`、`config`）
-2. A 交出 `dataset/04_injected.warc`
-3. B 交出 `docstore`、`passages` 和 `fixtures/`（**第一優先**）。fixtures 先包含索引、docstore、passages；vectorstore 等 A 的 `embed.py` 完成後再補上
+1. A 交出 `hw_bridge`（含 `hwlib`、`config`）（A1 已完成）
+2. 每位成員填好自己的 `[[inject.tokens]]`；由 A 產生 `dataset/04_injected.warc`、完成 1.5 的驗收，並填寫 `testset.jsonl` 的 token 題 `gold_docids`
+3. B 交出 `docstore.py`、`passages.py` 及其單元測試（**第一優先**）。fixtures 不是交付項目：任何人需要時，自行以 `main.py build --limit N` 產生（見 2.8）
 4. 兩人並行開發：A 的 `fusion` 先接假資料寫好；B 的 CLI 先接 `fake_retrieve()`
 5. A 完成全量建置（`index/`、`store/`）
 6. 整合
+
+（依 A1 / 討論修正）
 
 ---
 
 ## 2. 建置期：資料管線、索引、embedding 與詞彙檢索
 
-本節除 2.4（B）外由 A 負責。建置期產物統一由 `main.py build` 產生。
+本節除 2.2（手動進行，分工見 1.7）與 2.4（B）外由 A 負責。建置期產物統一由 `main.py build` 產生；`04_injected.warc` 例外，是手動產生的輸入。（依 A1 / 討論修正）
 
 ### 2.1 hwlib 橋接（`rag/hw_bridge.py`）
 對外只暴露下列函式（`[VERIFY-01]`–`[VERIFY-10]`）：
 ```python
 def iter_documents(warc_path, limit: int | None = None) -> Iterator[tuple[int, str, str, str]]  # (docid, trec_id, url, cleaned_text)
-def iter_raw_records(warc_path) -> Iterator[bytes]                    # 2.2 逐筆複製用
+def iter_raw_records(warc_path) -> Iterator[bytes]                    # 逐筆原始 record（手動修改 WARC 時可用，見 2.2）
+def inspect_targets(warc_path, trec_ids: set[str]) -> dict[str, TargetInfo]   # 1.5 挑選目標時的確認
 def preprocess(text: str) -> list[str]                               # stop+stem 前處理，回傳 term 序列
 def build_lexical_index(warc_path, index_dir, limit: int | None = None) -> dict   # 2.3，回傳 N、vocab_size 等統計
 def build_doc_norms(index_dir) -> None                               # 2.3，ltc norms
 def load_ranker(index_dir) -> Ranker                                  # HW2 VSM 排序器
 ```
-- 2.2 的 inject 驗證另需讀取每筆 record 的 TREC-ID 與 HTTP Content-Type，對應函式由 A 在實作時補進此清單。
+```python
+@dataclass(frozen=True, slots=True)
+class TargetInfo:
+    docid: int                 # TREC-ID 尾碼整數
+    content_type: str          # HTTP Content-Type 的 MIME 部分：小寫、去掉參數；缺少時為 "(none)"
+    cleaned_text: str | None   # 與 iter_documents 的 cleaned_text 相同；hwlib 排除該文件時為 None
+```
+- `inspect_targets`：只讀一次 WARC、只對目標 record 執行清理；找不到的 trec_id 不出現在回傳的 dict 中；全部找到後提前停止（A1 實測：3 篇目標 1.5 秒，含不存在的 id 需讀完整檔 2.8 秒）。
+- `limit` 必須是 `None` 或 ≥ 1，否則 raise `ValueError`（HW1 的 `--limit 0` 代表不限制，這裡不沿用）。
+- 實作者另可參考 `plans/A1-hwlib-config-bridge.md` 的介面表與驗證結果。
+（依 A1 / 討論修正）
 
 **匯入方式**
 - `from hwlib import documents, tokenizer, ...`，不需要操作 `sys.path`。
@@ -327,6 +359,7 @@ def load_ranker(index_dir) -> Ranker                                  # HW2 VSM 
 |---|---|---|
 | `iter_documents` | `documents.iter_documents(str(path))` | 轉成 `(doc.doc_num, doc.trec_id, doc.url, doc.text)`。`limit` 計算產出的篇數，與 HW1 `build --limit` 相同。**`doc_num` = TREC-ID 尾碼整數，不是流水號**。被排除的文件不會產出；空文字的文件仍會產出（`text == ""`） |
 | `iter_raw_records` | `warc.iter_records(path)` | 原樣轉出；所有 record 依序串接後與原檔逐位元組相同。解析標頭用 `warc.split_headers` + `warc.parse_header_lines`（欄位名為小寫，例如 `warc-trec-id`） |
+| `inspect_targets` | `warc.iter_responses(path)`，只對目標呼叫 `documents.to_document(resp)` | 與 `documents.iter_documents` 走同一條路徑，結果與 `iter_documents` 逐字相同；`to_document` 回傳 None 時 `cleaned_text = None` |
 | `preprocess` | 模組層級單例 `tokenizer.Preprocessor(**PREPROCESSOR_CONFIG)`，呼叫 `.process(text)` | 取 `[t for _, t in ...]`。初始化約 1.8 秒，必須重用同一個實例 |
 | `build_lexical_index` | `indexer.Indexer(spimi=False)` 逐篇呼叫 `add_document(doc, PRE.process(doc.text))`；再由 `writer.IndexWriter(index_dir)` 依序呼叫 `.write_binary_format(ix)`、`.write_doc_map(ix)`、`.write_metadata(ix, config=PREPROCESSOR_CONFIG)` | 不用 `Indexer.build()`（會 print 進度），也不用 `write_all()`（會多寫出約 221 MB 的 `postings.txt` 與 `dictionary.txt`）。`metadata.json` 要最後寫。寫完後執行 2.3 的 docid 連續性檢查 |
 | `build_doc_norms` | `build_norms.build_norms(index_dir, "ltc")` | 必須在 `metadata.json` 寫完之後呼叫 |
@@ -350,25 +383,14 @@ class Ranker:
   2. 立刻呼叫一次 `reader.get_norms("ltc")`，讓 HW2 的 sha256 與 N 檢查在載入時就失敗，不要拖到第一次查詢。
 （依 VERIFY-01–07、09、10 修正）
 
-### 2.2 埋特殊 token（`rag/inject.py`）
-- 輸入：config 的 `[[inject.tokens]]`。目標由 A 依 1.5 的規則挑選並填入 config；B 只提供自己的 `student_id` 與 `sentence`。
-- **inject 開始前先執行驗證**：
-  - 檢查 1.5 的四條驗證規則。任何一條不符合，就在 stderr 列出**所有**違規項目，然後 exit 1；不寫出任何檔案，也不自動替換目標。
-  - 驗證要讀 `source_warc` 一次：只需要每筆 record 的 TREC-ID 與 HTTP Content-Type，並且只對目標文件執行清理。
-- 驗證通過後，用 `hw_bridge.iter_raw_records()` 讀 `source_warc`（依 `b"WARC/0.18"` 邊界切割，`[VERIFY-03]`），逐筆寫到 `injected_warc`。非目標的 record 以原始 bytes 直接寫出，不重新組裝。
-  - 先寫到暫存檔，完成後再以 `os.replace` 換成正式檔名，避免中斷時留下不完整的檔案。
-- 遇到目標 TREC-ID（WARC 標頭的 `warc-trec-id`）時，在 HTML 的 `</body>` 前插入 `<p>{句子}</p>`；找不到 `</body>` 就加在 payload 尾端。
-- 更新被修改 record 的 WARC 標頭 `Content-Length`；若 HTTP 標頭也有 `Content-Length`，一併更新。hwlib 不讀這個欄位，更新只是為了格式正確。
-- 為什麼只選 `text/html`（1.5 規則 2）：`text/plain` 文件沒有 `</body>`，插入的 `<p>` 會留在清理後的文字裡。
-- **同步 gold_docids**：
-  - inject 完成後，把每組被埋入的 docid（TREC-ID 尾碼整數，依遞增排序）寫進 `eval/testset.jsonl` 中 `type == "token"` 且 `query == student_id` 的題目的 `gold_docids`。其他行原樣保留。
-  - 找不到對應的題目時，新增一行 `{"id": "t-<student_id>", "type": "token", "query": "<student_id>", "gold_docids": [...], "answer": "<sentence>", "paraphrase": false}`。
-- 驗收：
-  1. 新 WARC 用 `hw_bridge.iter_documents` 讀取，文件數仍為 34,786，而且所有非目標文件的清理後文字與原檔完全相同。
-  2. 目標文件的清理後文字包含該句子。
-  3. `preprocess(句子)` 的結果包含學號這個 term。
-  4. `testset.jsonl` 中每個學號的 `gold_docids`，與 config 的 `target_trec_ids` 換算出的 docid 相同。
-（依 VERIFY-01、VERIFY-03 修正）
+### 2.2 埋特殊 token（手動，取代原本的 `rag/inject.py`）
+- 不寫程式自動產生：沒有 `rag/inject.py`、沒有事前驗證程式，`main.py build` 也沒有 inject 階段。
+- 流程：
+  1. 每位成員依 1.5 挑選自己的 3 篇目標並完成確認，把 `student_id`、`sentence`、`target_trec_ids` 填入 `config.toml` 的 `[[inject.tokens]]`。
+  2. 由 A 統一修改 WARC：以 `source_warc` 為底，只修改目標 record，產生唯一一份 `injected_warc`（`dataset/04_injected.warc`）。其他人不另外產生。
+  3. A 執行 1.5 的驗收，並手動把每組埋入的 docid（TREC-ID 尾碼整數，依遞增排序）填入 `eval/testset.jsonl` 對應 token 題的 `gold_docids`。
+- 修改方式的建議（沿用原設計，非強制；結果以 1.5 驗收第 2 項確認）：在目標 HTML 的 `</body>` 前插入 `<p>{句子}</p>`；非目標 record 的 bytes 不動，record 邊界依 `b"WARC/0.18"`（`[VERIFY-03]`）。hwlib 不讀 `Content-Length`，是否更新只影響格式正確性。
+（依 VERIFY-01、VERIFY-03 修正）（依 A1 / 討論修正）
 
 ### 2.3 重建詞彙索引（`rag/build.py` 的第一階段）
 - 以 `injected_warc` 為輸入，依序呼叫 `hw_bridge.build_lexical_index(injected_warc, index_dir, limit)` 與 `hw_bridge.build_doc_norms(index_dir)`（`[VERIFY-05][VERIFY-09]`）。
@@ -378,19 +400,19 @@ class Ranker:
   - `doc_map.json` 的 key 集合必須恰好是 `{"0", ..., str(N-1)}`，而且 `metadata.json` 的 `N == len(doc_map)`。
   - 原因：docid 實際上是 TREC-ID 尾碼，不是流水號。HW2 的 norms 是以 docid 為下標、長度為 N 的陣列，docid 有空號或沒從 0 開始時會出錯，或靜默讀錯資料。
 - 驗收：見 1.5（查詢學號，命中的文件 = 埋入的文件）。
-- 耗時參考：全量建置約 6–7 分鐘、峰值記憶體約 1.1 GB；norms 約 15 秒。
-（依 VERIFY-01、05、07、09 修正）
+- 耗時參考：全量索引約 8.5–9 分鐘（A1 實測 517 秒）、峰值記憶體約 1.0 GB；norms 約 15 秒。
+（依 VERIFY-01、05、07、09 修正）（依 A1 / 討論修正）
 
 ### 2.4 Doc store 與 passage（`rag/docstore.py`、`rag/passages.py`）（B）
 - `docs` 表：`docid`、`trec_id`、`url`、`text` 直接取自 `hw_bridge.iter_documents()`；寫入後 assert 文件數與 `doc_map.json` 的筆數一致。
 - `passages` 表：清理後文字以空白切字，每段 `passage_words` 字、步長 `passage_stride`；少於 30 字的文件整篇當一段，空文件跳過。
 - 存取函式：`get_doc(docid)`、`get_passage(pid)`、`get_passages_by_doc(docid)`。
 - 由 `build.py` 的 `docstore` 階段呼叫（A 負責串接）。
-- **盡早產出 `fixtures/`**（交接順序第 3 步，第一優先）：
-  - 內容：用 `main.py build --limit N` 產出語料**前 N 篇**的產物（N 預設 200，見 2.8）。
+- **交付項目**（交接順序第 3 步，第一優先）：`docstore.py`、`passages.py` 及其單元測試。
+- **fixtures 不是交付項目、不進版控**：任何人需要時，自行用 `main.py build --limit N` 產出語料**前 N 篇**的產物（N 預設 200，見 2.8）。
   - 只能取前 N 篇，不能挑任意子集，因為 2.3 的連續性檢查會擋下。
   - 依 1.5 的規則，每個學號至少有一篇在 fixtures 中。測試 fixtures 時，`gold_docids` 要先過濾成 docid < N 的那幾篇。
-（依 VERIFY-01、VERIFY-09 修正）
+（依 VERIFY-01、VERIFY-09 修正）（依 A1 / 討論修正）
 
 ### 2.5 Embedding（`rag/embed.py` + `build.py` 第二階段）
 - `embed.py` 定義 `PrefixedOllamaEmbeddings(langchain_core.embeddings.Embeddings)`：
@@ -401,6 +423,7 @@ class Ranker:
 - **兩種模式**（建構時指定）：
   - 建置時：預設使用 GPU。
   - 查詢時：`num_gpu=0`，embedding 改用 CPU，避免和 LLM 搶 VRAM（已實測兩者同時載入 GPU 會讓速度慢約 20 倍）。
+  - `OllamaEmbeddings` 是否支援 `num_gpu`，以及查詢模式下 embedding / LLM 實際的 CPU / GPU 分配，見 `[VERIFY-15]`（待查，實作 `embed.py` 時查證）。（依 A1 / 討論修正）
 - B 的 `semantic` 只能透過 `embed.py`（查詢模式）轉換 query。
 - **embedding 階段**：
   - 由 `build.py` 依 `batch_size` 切批 embed 所有 passage。
@@ -424,6 +447,8 @@ class Ranker:
   3. 每篇從 `get_passages_by_doc` 挑最佳 passage：對每段 passage 執行 `preprocess`，以 query term 命中次數計分，同分取 pid 較小者。
      - 不使用索引中的位置資訊來定位 passage：位置是「保留停用詞空洞的 token 序號」，對不回清理後文字的字位置。
 - 查詢沒有任何有效 term（例如全是停用詞）時回傳空清單，不報錯。
+- **啟動時**：路徑取自 `paths(cfg["runtime"]["use_fixtures"])`，並先呼叫 `require_build_done(paths(...)["build_meta"])`；建置未完成就直接報錯，不載入索引（1.3）。
+（依討論修正）
 
 ### 2.7 RRF 合併（`rag/fusion.py`）與統一介面（`rag/retrieve.py`）
 - `HybridRetriever(BaseRetriever)`：
@@ -436,12 +461,22 @@ class Ranker:
 - `retrieve()` 依 `mode` 分派到三個 retriever 之一，回傳前 k 筆並補上 `rank`
 
 ### 2.8 一鍵重建（`main.py build` → `rag/build.py`）
-- 階段順序：`inject` → `index`（含 doc_map）→ `norms` → `docstore`（含 passages）→ `embed` → `vectorstore` → 寫出 build_meta
-- **跳過規則**：每個階段的產物已存在就跳過。改了 config 或 `--limit` 之後，要加 `--force` 全部重建。
-- `--force`：忽略既有產物，所有階段全部重建（embedding checkpoint 一併清空）。
+- 輸入：`injected_warc`（手動產生，見 2.2）。不存在時報錯，提示先取得 `dataset/04_injected.warc`。
+- **輸出位置（目標資料夾）**：
+  - 由 `rag.config.paths(fixtures=--limit 是否有給)` 決定；**build 不讀 `[runtime] use_fixtures`**（1.3）。
+  - 沒有 `--limit`：`paths(False)` 的 `index_dir`、`docstore`、`vectorstore_dir`、`embed_ckpt_dir`、`build_meta`。
+  - 有 `--limit N`：`paths(True)` 的同名路徑（`fixtures/index/`、`fixtures/store/docstore.sqlite`、`fixtures/store/vectorstore/`、`fixtures/store/embed_ckpt/`、`fixtures/store/build_meta.json`）。**不讀取也不覆寫**正式產物。
+  - 理由：避免開發者忘了切換路徑時，`--force` 清掉全量產物（全量重建約 40–45 分鐘：索引實測約 9 分鐘；embedding 依 bench 工具推估 32–35 分鐘，全量建置後以實測數字更新）。
+- 階段順序：寫入 build_meta（`status: "in_progress"`）→ `index`（含 doc_map）→ `norms` → `docstore`（含 passages）→ `embed` → `vectorstore` → build_meta 改為 `status: "done"`
+- **開始時比對 build_meta**：只要目標資料夾的 `build_meta.json` 存在（不論 `status`），就比對其中的 `limit`、`inject_tokens`、embed 設定（`embed_model`、`query_prefix`、`doc_prefix`、`dim`）與目前的 config / `--limit`；任一項不一致就報錯並停止，提示加 `--force` 重建。`status` 為 `"in_progress"` 時，在 stderr 提示上次建置未完成、這次會從中斷處繼續。
+- **跳過規則**：比對通過後，每個階段的產物已存在就跳過。
+- `--force`：只清空**這次建置的目標資料夾**（上面列出的位置；不動 `dataset/`、`eval/`、`output/`，有 `--limit` 時也不動正式產物），再重建所有階段。
+- 輸出資料夾由 `build.py` 在執行時建立（1.2）。
 - embedding 階段可以中斷後續跑（見 2.5）。
 - docid 連續性 assert（見 2.3）每次建置都執行。
-- `--limit N`：只處理語料前 N 篇，同時套用到索引、docstore、passage、embedding，與 HW1 的同名選項一致。fixtures 就是前 N 篇的建置結果，輸出到 `fixtures_dir`；N 預設 200，可以調到 500 或 1000。
+- `--limit N`：只處理語料前 N 篇，同時套用到索引、docstore、passage、embedding，與 HW1 的同名選項一致。N 必須 ≥ 1，否則報錯（2.1）。N 預設 200，可以調到 500 或 1000。
+- **fixtures**：就是 `--limit N` 的建置結果，不進版控，需要時自行產生，用於手動測試與整合測試（單元測試不使用，見 1.6-7）。query / eval 要讀 fixtures 時，在 `config.local.toml` 設定 `[runtime] use_fixtures = true`（1.3）。
+（依 A1 / 討論修正）
 
 ---
 
@@ -489,7 +524,8 @@ Question: <question>
 
 ### 3.3 語意檢索（`rag/semantic.py`）
 - `SemanticRetriever(BaseRetriever)`：
-  1. **模型一致性檢查**：啟動時讀 `build_meta.json`；若 `embed_model`、`query_prefix`、`doc_prefix`、`dim` 任一項與 config 不一致，**直接 raise 錯誤並停止**（否則結果會錯亂但不會報錯）
+  0. **建置完成檢查**：路徑取自 `paths(cfg["runtime"]["use_fixtures"])`；啟動時先呼叫 `require_build_done(paths(...)["build_meta"])`，建置未完成就直接報錯（1.3）。
+  1. **模型一致性檢查**：使用 `require_build_done` 回傳的 build_meta；若 `embed_model`、`query_prefix`、`doc_prefix`、`dim` 任一項與 config 不一致，**直接 raise 錯誤並停止**（否則結果會錯亂但不會報錯）
   2. 載入：`FAISS.load_local(vectorstore_dir, PrefixedOllamaEmbeddings(查詢模式), allow_dangerous_deserialization=True, distance_strategy=DistanceStrategy.MAX_INNER_PRODUCT)`（`[VERIFY-12]`）
      - query 只能透過 `embed.py` 轉換（見 2.5），不得自行建立 `OllamaEmbeddings`。
      - `load_local` **不會**保存 `distance_strategy`，必須再傳一次。`DistanceStrategy` 的匯入方式見 2.5。
@@ -500,7 +536,7 @@ Question: <question>
      - 分數型別是 `numpy.float32`，要轉成 `float()`。
   4. 同一 docid 只保留分數最好的 passage，取前 `k_each` 篇
   5. 從 docstore 補上 `trec_id`、`url`，依 1.4 的 metadata 格式輸出
-（依 VERIFY-12 修正）
+（依 VERIFY-12 修正）（依討論修正）
 
 ### 3.4 CLI（`main.py query` → `rag/cli.py`）
 ```
@@ -524,25 +560,32 @@ uv run python src/main.py query --interactive        # 選做：prompt> 互動�
      "...passage 前 30 字..."
   ```
 - 檢索與生成的耗時寫到 stderr
+- **建置完成檢查**：
+  - `--mode none` 不需要建置產物，所以不呼叫 `require_build_done`。
+  - `lexical`、`semantic`、`hybrid` 由對應的 retriever 在啟動時檢查（2.6、3.3）。
+  - `--compare` 在**開始時**先呼叫 `require_build_done(paths(use_fixtures)["build_meta"])`，未完成就直接報錯並以 exit 1 結束，不輸出無 RAG 的回答。原因：避免先花時間產生無 RAG 回答，最後才因建置未完成而失敗。
 
 ### 3.5 評估（`main.py eval` → `rag/evaluate.py`）
 - **生成對照（必做，截圖的來源）**：每一題跑 `none` 與 `hybrid`，把問題、兩個回答、引用文件寫到 `output/compare.md`
 - **檢索評估（加分項，保留）**：對 testset 每一題跑 lexical / semantic / hybrid，計算 Hit@1、Hit@5、MRR（命中 `gold_docids` 任一篇即算），**分 fact / token 兩類**，fact 再分出 `paraphrase` 題，輸出 Markdown 表格到 `output/retrieval_eval.md`
 - 預期現象（報告會用到）：token 題（純學號）lexical 強、semantic 弱；paraphrase 題 semantic 較強；hybrid 在各類題目都穩定
+- **啟動時**：路徑（含 `output_dir`）取自 `paths(cfg["runtime"]["use_fixtures"])`，因此 `use_fixtures = true` 時輸出到 `fixtures/output/`。這是刻意的設計：避免 fixtures 的 eval 結果覆蓋正式輸出。先呼叫 `require_build_done(paths(...)["build_meta"])`，建置未完成就直接報錯，不跑任何題目（1.3）。
+（依討論修正）
 
 ### 3.6 截圖
 - 從 `--compare` 的結果挑選：至少 3 題 fact 題，加上每位成員的 token 題各 1 題
 - 每張截圖要看得到：問題、無 RAG 回答、有 RAG 回答、引用的 Document ID
 
 ### 3.7 README、說明文件與打包
-- `HW3/README.md`（格式比照 HW1/HW2 README）：環境、`uv sync`（在 `HW3/` 下）、NLTK `stopwords` 下載步驟（見 1.1）、`ollama pull` 指令（兩個模型）、Ollama 最低版本、`04.warc` 放置位置、`build` / `query` / `eval` 用法、`config.local.toml` 的用途、系統特色、困難與解決方案
+- `HW3/README.md`（格式比照 HW1/HW2 README）：環境、`uv sync`（在 `HW3/` 下）、NLTK `stopwords` 下載步驟（見 1.1）、`ollama pull` 指令（兩個模型）、Ollama 最低版本、`04.warc` 放置位置、`04_injected.warc` 的產生方式（以 `config.toml` 的 `[[inject.tokens]]` 為準，照 2.2 的手動步驟從 `04.warc` 修改產生；不進版控、不隨繳交附上）、開發說明（1.5 的 `search.py` 檢查需要本機已有 `HW2/index`）、`build` / `query` / `eval` 用法、`config.local.toml` 的用途、系統特色、困難與解決方案
 - 一頁說明文件（彙整 A 提供的段落）：
   - 主要特色：hybrid retrieval（RRF）、引用來源、無 RAG 對照模式、檢索評估表、可續跑的建置流程
   - 遇到的主要困難
   - 執行環境需求：Python 版本、uv、Ollama 版本、模型名稱與 tag
   - 組員名單與負責部分（依 1.7 列出）
 - 打包：單一壓縮檔，內容是 `HW3/` 目錄。**HW3 是獨立專案（hwlib 已複製進來），不需要包含 HW1/HW2**。**繳交前確認檔名格式**。依大小決定是否附上 `HW3/index/`、`HW3/store/`（HW2 有附完整索引）；不附的話，README 要寫清楚重建指令與預估耗時
-- 最後在乾淨的 clone 上照 README 從頭跑一次，確認可以重現
+- 最後在乾淨的 clone 上照 README 從頭跑一次，確認可以重現（`04_injected.warc` 依 README 的手動步驟產生）
+（依討論修正）
 
 ---
 
@@ -554,7 +597,7 @@ uv run python src/main.py query --interactive        # 選做：prompt> 互動�
 
 ---
 
-## 5. 查證清單（已全部查證，結果見第 6 節）
+## 5. 查證清單（VERIFY-01–14 已查證，VERIFY-15 待查；結果見第 6 節）
 
 | ID | 要確認的事項 | 查證位置 | 影響範圍 |
 |---|---|---|---|
@@ -572,6 +615,7 @@ uv run python src/main.py query --interactive        # 選做：prompt> 互動�
 | VERIFY-12 | LangChain FAISS 目前版本的 API：`from_embeddings` 參數、內積距離設定（`distance_strategy`）、`load_local` 的反序列化參數、`similarity_search_with_score` 回傳的是距離還是相似度 | `langchain-community` 文件 / 原始碼 | 1.4、2.5、3.3 |
 | VERIFY-13 | `ChatOllama` 關閉 Qwen3 思考模式的參數名稱 | `langchain-ollama` 文件 / 原始碼 | 3.1 |
 | VERIFY-14 | Python 版本與既有依賴；新增 LangChain 相關套件是否與既有套件衝突 | 根目錄 `pyproject.toml`、`uv.lock` | 1.1 |
+| VERIFY-15 | `langchain_ollama.OllamaEmbeddings` 是否支援 `num_gpu`；查詢模式（`num_gpu=0`）的 embedding 與 `qwen3:8b` 同時載入時，`ollama ps` 是否顯示 embedding 100% CPU、LLM 100% GPU | `langchain-ollama` 原始碼；本機 `ollama ps` | 2.5、3.3（依 A1 / 討論修正） |
 
 ---
 
@@ -579,17 +623,18 @@ uv run python src/main.py query --interactive        # 選做：prompt> 互動�
 
 | ID | 結論 | 依據（檔案:行號 / 連結） | 查證者 / 日期 |
 |---|---|---|---|
-| VERIFY-01 | **入口**：`documents.iter_documents(path, stats=None) -> Iterator[Document]`，`Document(doc_num, trec_id, url, kind, text)`，是 frozen dataclass。<br>**docid 不是流水號**：`doc_num` = TREC-ID 尾碼整數（`clueweb09-en0000-04-00123` → 123），從 0 起算；缺少 TREC-ID 時直接 raise。<br>**順序**：固定是 WARC 內的順序。<br>**04.warc 實際情況**：0 篇被排除，所以 docid 剛好是連續的 0..34785，而且與 doc_map 的 key、TREC 尾碼一一相等（已實測）。換成其他 WARC 時可能出現空號。 | `HW1/src/warc.py:24,67-72,96-117`；`HW1/src/documents.py:18-24,86-90`；`HW1/logs/dataset_report.txt`；實測 `HW3/scratch/v01_doc_map.py` | Claude Code / 2026-11-25 |
+| VERIFY-01 | **入口**：`documents.iter_documents(path, stats=None) -> Iterator[Document]`，`Document(doc_num, trec_id, url, kind, text)`，是 frozen dataclass。<br>**docid 不是流水號**：`doc_num` = TREC-ID 尾碼整數（`clueweb09-en0000-04-00123` → 123），從 0 起算；缺少 TREC-ID 時直接 raise。<br>**順序**：固定是 WARC 內的順序。<br>**04.warc 實際情況**：0 篇被排除，所以 docid 剛好是連續的 0..34785，而且與 doc_map 的 key、TREC 尾碼一一相等（已實測）。換成其他 WARC 時可能出現空號。 | `HW1/src/warc.py:24,67-72,96-117`；`HW1/src/documents.py:18-24,86-90`；`HW1/logs/dataset_report.txt`；本機 scratch 實測（腳本不進版控）；A1 驗證 1 以 hw_bridge 重驗（`plans/A1-hwlib-config-bridge.md`） | Claude Code / 2026-11-25 |
 | VERIFY-02 | **可以單獨呼叫**：`extract.classify(content_type, body) -> (kind, reason)`，再呼叫 `extract.extract_text(body, kind) -> str`；也可以用 `documents.to_document(resp)` 一次完成。兩者都不經過 tokenizer。<br>**排除**：二進位、非 HTML/plain 類型或解析例外時回傳 None，不產出。<br>**空文件**：擷取後為空字串時仍會產出，`text == ""`；04.warc 只有 1 篇。 | `HW1/src/extract.py:42-50,84-93`；`HW1/src/documents.py:6,56-83`；`HW1/README.md:107` | Claude Code / 2026-11-25 |
-| VERIFY-03 | **切割**：`warc.iter_records(path) -> Iterator[bytes]`，逐行讀取，遇到以 `b"WARC/0.18"` 開頭的行就切出一筆。依序串接後與原檔逐位元組相同（已用合成 WARC 實測）。<br>**Content-Length**：HW1 原始碼中沒有任何地方讀取它。 | `HW1/src/warc.py:13,31-59`；實測 `HW3/scratch/v03_records_roundtrip.py` | Claude Code / 2026-11-25 |
-| VERIFY-04 | **公開介面**：`tokenizer.Preprocessor(casefold=True, stopword=False, stem=False, lemma=False)`，方法 `.process(text) -> list[tuple[int, str]]`（位置從 1 起算，保留停用詞空洞）；另有 `tokenize(text) -> list[str]`。<br>**stop+stem 實測**：`"The IR HW3 verification code 114598000 quokkazen is registered by team member Terry."` → `ir, hw3, verif, code, 114598000, quokkazen, regist, team, member, terri`。<br>**純數字**：保留，不 stem（只有 `isalpha()` 的 token 才 stem）；`1,234`、`3.14` 也會原樣保留。<br>**連字號**：`-` 會被切開（`114598000-quokkazen` → 兩個 term）。<br>**長度**：超過 `MAX_LEN = 64` 的 token 整個丟掉。<br>**結論**：學號可以完整保留。HW2 的 `tokenizer.py` 輸出與 HW1 完全相同。 | `HW1/src/tokenizer.py:12-13,36-58,84-106`；實測 `HW3/scratch/v04_preprocess.py`（`v04_hw1.out`、`v04_hw2.out`） | Claude Code / 2026-11-25 |
+| VERIFY-03 | **切割**：`warc.iter_records(path) -> Iterator[bytes]`，逐行讀取，遇到以 `b"WARC/0.18"` 開頭的行就切出一筆。依序串接後與原檔逐位元組相同（已用合成 WARC 實測）。<br>**Content-Length**：HW1 原始碼中沒有任何地方讀取它。 | `HW1/src/warc.py:13,31-59`；本機 scratch 實測（腳本不進版控）；A1 驗證 2 以全量 04.warc 重驗（`plans/A1-hwlib-config-bridge.md`） | Claude Code / 2026-11-25 |
+| VERIFY-04 | **公開介面**：`tokenizer.Preprocessor(casefold=True, stopword=False, stem=False, lemma=False)`，方法 `.process(text) -> list[tuple[int, str]]`（位置從 1 起算，保留停用詞空洞）；另有 `tokenize(text) -> list[str]`。<br>**stop+stem 實測**：`"The IR HW3 verification code 114598000 quokkazen is registered by team member Terry."` → `ir, hw3, verif, code, 114598000, quokkazen, regist, team, member, terri`。<br>**純數字**：保留，不 stem（只有 `isalpha()` 的 token 才 stem）；`1,234`、`3.14` 也會原樣保留。<br>**連字號**：`-` 會被切開（`114598000-quokkazen` → 兩個 term）。<br>**長度**：超過 `MAX_LEN = 64` 的 token 整個丟掉。<br>**結論**：學號可以完整保留。HW2 的 `tokenizer.py` 輸出與 HW1 完全相同。 | `HW1/src/tokenizer.py:12-13,36-58,84-106`；本機 scratch 實測（腳本不進版控）；A1 驗證 3 重驗（`plans/A1-hwlib-config-bridge.md`） | Claude Code / 2026-11-25 |
 | VERIFY-05 | **寫死，沒有參數可以覆寫**：<br>• 輸入由 `resolve_warc_input()` 掃描相對於 CWD 的 `HW1/dataset/*.warc`，必須剛好 1 個檔案。<br>• 輸出固定為 `HW1/output`。<br>**替代做法**：以函式呼叫重現 `run_build` 的核心邏輯，見 2.1 的 `build_lexical_index`。 | `HW1/src/main.py:52-80,83-159,446-456` | Claude Code / 2026-11-25 |
-| VERIFY-06 | **函式**：`rank.rank(qtf: Counter[str], candidates: set[int] \| None, reader, scheme="ltc.ltc", champion_r=None) -> list[tuple[int, float]]`。<br>• 輸入是 term 的 Counter，**不是 AST**。`candidates=None` 就是自由文字。<br>• 沒有 top-k 參數，回傳所有 score > 0 的文件，依 `(-round(score, 6), doc_num)` 排序。<br>• 與 `search_query()` 的自由文字結果逐筆相同（實測 5 個查詢）。<br>• 未配對的 `"` 會讓 parser raise ValueError。 | `HW2/src/rank.py:33-120`；`HW2/src/search.py:23-61`；`HW2/src/parser.py:222-241,447-474`；`HW2/src/boolean.py:37-38`；實測 `HW3/scratch/v06_rank_equiv.py` | Claude Code / 2026-11-25 |
-| VERIFY-07 | **`IndexReader` 全部是 lazy-load**：<br>• `lexicon.tsv` 在第一次查詢時讀（實測 0.56 秒）。<br>• `doc_norms.*` 在第一次 `get_norms` 時讀；此時核對 log_base、formula、scheme、N、count，以及 `lexicon.tsv`、`postings.bin`、`metadata.json` 的 size 與 sha256，另外檢查 bin 大小是否 = 8×N（實測 0.07 秒）。<br>**缺檔行為**：`champions.*` 只有在 `champion_r` 不是 None 時才讀；`surface_vocab.*` 只有在 parser 展開 wildcard/Soundex 或拼字建議時才讀。所以走 `rank(..., champion_r=None)` 時，缺少這兩類檔案不會報錯。 | `HW2/src/writer.py:357-366,399-423,481-552,668-701`；`HW2/src/parser.py:355-373`；`HW2/src/surface.py:167`；實測 `HW3/scratch/v06_rank_equiv.py` | Claude Code / 2026-11-25 |
-| VERIFY-08 | **結構**：`{"<doc_num 字串>": {"trec_id": str, "doc_len": int, "url": str}}`。key 是**字串**，`IndexReader` 讀取時會轉成 int。<br>**範例**：`"0": {"trec_id": "clueweb09-en0000-04-00000", "doc_len": 369, "url": "http://0-men.lyricsfans.com/"}`。<br>**實測**：34,786 筆，key 是連續的 0..34785；檔案 5.3 MB，載入 0.04 秒。 | `HW1/src/writer.py:320-337`；`HW2/src/writer.py:413-423`；實測 `HW3/scratch/v01_doc_map.py` | Claude Code / 2026-11-25 |
+| VERIFY-06 | **函式**：`rank.rank(qtf: Counter[str], candidates: set[int] \| None, reader, scheme="ltc.ltc", champion_r=None) -> list[tuple[int, float]]`。<br>• 輸入是 term 的 Counter，**不是 AST**。`candidates=None` 就是自由文字。<br>• 沒有 top-k 參數，回傳所有 score > 0 的文件，依 `(-round(score, 6), doc_num)` 排序。<br>• 與 `search_query()` 的自由文字結果逐筆相同（實測 5 個查詢）。<br>• 未配對的 `"` 會讓 parser raise ValueError。 | `HW2/src/rank.py:33-120`；`HW2/src/search.py:23-61`；`HW2/src/parser.py:222-241,447-474`；`HW2/src/boolean.py:37-38`；本機 scratch 實測（腳本不進版控）；A1 驗證 5 重驗（`plans/A1-hwlib-config-bridge.md`） | Claude Code / 2026-11-25 |
+| VERIFY-07 | **`IndexReader` 全部是 lazy-load**：<br>• `lexicon.tsv` 在第一次查詢時讀（實測 0.56 秒）。<br>• `doc_norms.*` 在第一次 `get_norms` 時讀；此時核對 log_base、formula、scheme、N、count，以及 `lexicon.tsv`、`postings.bin`、`metadata.json` 的 size 與 sha256，另外檢查 bin 大小是否 = 8×N（實測 0.07 秒）。<br>**缺檔行為**：`champions.*` 只有在 `champion_r` 不是 None 時才讀；`surface_vocab.*` 只有在 parser 展開 wildcard/Soundex 或拼字建議時才讀。所以走 `rank(..., champion_r=None)` 時，缺少這兩類檔案不會報錯。 | `HW2/src/writer.py:357-366,399-423,481-552,668-701`；`HW2/src/parser.py:355-373`；`HW2/src/surface.py:167`；本機 scratch 實測（腳本不進版控）；A1 驗證 5 重驗（`plans/A1-hwlib-config-bridge.md`） | Claude Code / 2026-11-25 |
+| VERIFY-08 | **結構**：`{"<doc_num 字串>": {"trec_id": str, "doc_len": int, "url": str}}`。key 是**字串**，`IndexReader` 讀取時會轉成 int。<br>**範例**：`"0": {"trec_id": "clueweb09-en0000-04-00000", "doc_len": 369, "url": "http://0-men.lyricsfans.com/"}`。<br>**實測**：34,786 筆，key 是連續的 0..34785；檔案 5.3 MB，載入 0.04 秒。 | `HW1/src/writer.py:320-337`；`HW2/src/writer.py:413-423`；本機 scratch 實測（腳本不進版控）；A1 驗證 1 以 hw_bridge 重驗（`plans/A1-hwlib-config-bridge.md`） | Claude Code / 2026-11-25 |
 | VERIFY-09 | **doc_map.json**：由 `writer.IndexWriter.write_doc_map(indexer)` 產生（HW1 與 HW2 相同）。<br>**build_norms**：<br>• 函式：`build_norms.build_norms(index_dir, scheme="ltc") -> None`。<br>• 輸入：同一目錄的 `lexicon.tsv`、`postings.bin`、`metadata.json`。<br>• 輸出：`doc_norms.bin`（N 個 double，下標 = doc_num）與 `doc_norms.meta.json`；結果會 print 到 stdout。<br>• **限制**：doc_num 必須剛好是 0..N-1，否則會發生 IndexError。 | `HW1/src/writer.py:242-282,320-337`；`HW2/src/build_norms.py:21-66` | Claude Code / 2026-11-25 |
-| VERIFY-10 | **結構**：兩者都不是 package，模組之間用扁平的絕對匯入，只能透過 `sys.path` 匯入。<br>**同名模組**有 8 個：5 個逐位元組相同；`tokenizer`、`writer`、`skip_builder` 不同，差異見 2.1 的表格。<br>**結論**：都不影響建置產物。已用合成 WARC 分別以兩邊建置，`lexicon.tsv`、`postings.bin`、`doc_map.json` 逐位元組相同。因此只採用 `HW2/src`。<br>**後續決定**：改為複製到 `HW3/src/hwlib/` 並把 import 改成相對匯入（見 1.1），不再操作 `sys.path`。所需模組 `warc`、`extract`、`documents`、`tokenizer`、`indexer`、`trie`、`writer`、`weighting`、`build_norms`、`rank` 彼此 import 封閉（唯一的函式內 import 是 `rank` 的 `from writer import IndexReader`，也在清單內）。 | `diff HW1/src/{tokenizer,writer,skip_builder}.py HW2/src/…`；實測 `HW3/scratch/v02b_build_equiv.py`、`v02b_make_warc.py`；`grep import HW2/src/*.py` | Claude Code / 2026-11-25、2026-11-26 |
-| VERIFY-11 | **query 前綴**：`task: search result \| query: `<br>**document 前綴**：`title: none \| text: `<br>**維度**：預設 768（本專案不截短）。<br>**輸入上限**：2048 tokens。<br>**Ollama**：頁面範例直接送原文；需要 **v0.11.10 以上**；`embeddinggemma:latest` 等於 `300m`（622 MB）。<br>**實測**：`tools/bench.py` 以 `OllamaEmbeddings` 加前綴取得向量，正常運作。 | https://ollama.com/library/embeddinggemma ；https://gemma.ai/models/embeddinggemma/model-card-v1/ ；https://huggingface.co/google/embeddinggemma-300m ；`HW3/tools/bench.py` | Claude Code / 2026-11-25；實測 2026-11-26 |
+| VERIFY-10 | **結構**：兩者都不是 package，模組之間用扁平的絕對匯入，只能透過 `sys.path` 匯入。<br>**同名模組**有 8 個：5 個逐位元組相同；`tokenizer`、`writer`、`skip_builder` 不同，差異見 2.1 的表格。<br>**結論**：都不影響建置產物。已用合成 WARC 分別以兩邊建置，`lexicon.tsv`、`postings.bin`、`doc_map.json` 逐位元組相同。因此只採用 `HW2/src`。<br>**後續決定**：改為複製到 `HW3/src/hwlib/` 並把 import 改成相對匯入（見 1.1），不再操作 `sys.path`。所需模組 `warc`、`extract`、`documents`、`tokenizer`、`indexer`、`trie`、`writer`、`weighting`、`build_norms`、`rank` 彼此 import 封閉（`rank` 的 `from writer import IndexReader` 位於 `if TYPE_CHECKING:` 區塊內，不是函式內 import；也在清單內，已一併改成相對匯入）。<br>**A1 實測**：以 hwlib 全量重建的 `lexicon.tsv`、`postings.bin`、`doc_map.json` 與 `HW2/index` 逐位元組相同（需鎖定 charset-normalizer，見 VERIFY-14）。（依 A1 / 討論修正） | `diff HW1/src/{tokenizer,writer,skip_builder}.py HW2/src/…`；本機 scratch 實測（腳本不進版控）；`grep import HW2/src/*.py`；A1 驗證 4 以全量 04.warc 重驗（`plans/A1-hwlib-config-bridge.md`） | Claude Code / 2026-11-25、2026-11-26 |
+| VERIFY-11 | **query 前綴**：`task: search result \| query: `<br>**document 前綴**：`title: none \| text: `<br>**維度**：預設 768（本專案不截短）。<br>**輸入上限**：2048 tokens。<br>**Ollama**：頁面範例直接送原文；需要 **v0.11.10 以上**；`embeddinggemma:latest` 等於 `300m`（622 MB）。<br>**實測**：以 bench 工具實測（獨立分支 `feat/hw3-bench`），`OllamaEmbeddings` 加前綴取得向量，正常運作。（依 A1 / 討論修正） | https://ollama.com/library/embeddinggemma ；https://gemma.ai/models/embeddinggemma/model-card-v1/ ；https://huggingface.co/google/embeddinggemma-300m ；以 bench 工具實測（獨立分支 `feat/hw3-bench`） | Claude Code / 2026-11-25；實測 2026-11-26 |
 | VERIFY-12 | 以 langchain-community **0.4.2** 的原始碼為準。<br>**建立**：`FAISS.from_embeddings(text_embeddings, embedding, metadatas=None, ids=None, **kwargs)`；傳入 `distance_strategy=MAX_INNER_PRODUCT` 時建 `IndexFlatIP`，其他值一律建 L2。<br>**匯入陷阱**：`DistanceStrategy` 必須從 `.vectorstores.utils` 匯入，從 `.vectorstores` 匯入會拿到 kinetica 的同名 enum。<br>**追加**：`add_embeddings(text_embeddings, metadatas, ids)`。<br>**載入**：`load_local(folder, embeddings, *, allow_dangerous_deserialization=False, **kwargs)`；不會保存 `distance_strategy`。<br>**分數**：IP 原始分數（`numpy.float32`），越大越相似，已依遞減排序。 | `langchain_community/vectorstores/faiss.py:203-235,365-453,985-1011,1091-1128,1147-1225`；`.../utils.py:12-20`；`.../__init__.py:381,391`；`.../kinetica.py:23-28`；https://pypi.org/project/langchain-community/0.4.2/ | Claude Code / 2026-11-25 |
-| VERIFY-13 | **參數名稱**：`reasoning`，型別 `bool \| str \| None`。`False` 會關閉思考模式（送出 `think: false`）；`None` 會使用模型預設，Qwen3 會思考。<br>**驗證模型**：`validate_model_on_init=True` 在模型不存在或連線失敗時丟出 `ValueError`。<br>**實測**：`tools/bench.py` 以 `ChatOllama(reasoning=False)` 確認可關閉思考模式。預設的 `qwen3:4b` 是只能思考的版本，關不掉（見 1.1）。 | `langchain_ollama/chat_models.py:529-548,805,966-967`；`langchain_ollama/_utils.py:12-47`；https://pypi.org/project/langchain-ollama/1.2.0/ ；`HW3/tools/bench.py` | Claude Code / 2026-11-25；實測 2026-11-26 |
-| VERIFY-14 | **根目錄 pyproject**：`name="hw1"`，`requires-python=">=3.12"`。直接依賴有 beautifulsoup4、ftfy、langdetect、lxml、nltk、spacy；`tqdm`、`numpy` 只是間接依賴。<br>**衝突檢查**：以既有 lock 版本為約束條件做解析（不安裝），結果無衝突，解析出 langchain-core 1.7.2、langchain-community 0.4.2、langchain-ollama 1.2.0、ollama 0.6.3、faiss-cpu 1.16.0。<br>**後續決定**：HW3 改為獨立專案（`HW3/pyproject.toml`），沿用上述版本；hwlib 實際用到的是 beautifulsoup4、lxml、ftfy、nltk、spacy（不需要 langdetect）。<br>測試用標準函式庫 `unittest`，不需要新增測試套件。 | `pyproject.toml`；`uv.lock`；`HW3/scratch/v14_resolved_locked.txt`；`HW2/src/{extract,tokenizer}.py` | Claude Code / 2026-11-25、2026-11-26 |
+| VERIFY-13 | **參數名稱**：`reasoning`，型別 `bool \| str \| None`。`False` 會關閉思考模式（送出 `think: false`）；`None` 會使用模型預設，Qwen3 會思考。<br>**驗證模型**：`validate_model_on_init=True` 在模型不存在或連線失敗時丟出 `ValueError`。<br>**實測**：以 bench 工具實測（獨立分支 `feat/hw3-bench`），`ChatOllama(reasoning=False)` 可關閉思考模式。預設的 `qwen3:4b` 是只能思考的版本，關不掉（見 1.1）。（依 A1 / 討論修正） | `langchain_ollama/chat_models.py:529-548,805,966-967`；`langchain_ollama/_utils.py:12-47`；https://pypi.org/project/langchain-ollama/1.2.0/ ；以 bench 工具實測（獨立分支 `feat/hw3-bench`） | Claude Code / 2026-11-25；實測 2026-11-26 |
+| VERIFY-14 | **根目錄 pyproject**：`name="hw1"`，`requires-python=">=3.12"`。直接依賴有 beautifulsoup4、ftfy、langdetect、lxml、nltk、spacy；`tqdm`、`numpy` 只是間接依賴。<br>**衝突檢查**：以既有 lock 版本為約束條件做解析（不安裝），結果無衝突，解析出 langchain-core 1.7.2、langchain-community 0.4.2、langchain-ollama 1.2.0、ollama 0.6.3、faiss-cpu 1.16.0。<br>**後續決定**：HW3 改為獨立專案（`HW3/pyproject.toml`），沿用上述版本；hwlib 實際用到的是 beautifulsoup4、lxml、ftfy、nltk、spacy（不需要 langdetect）。<br>**A1 補充：間接依賴也會影響建置產物**。bs4 的 `UnicodeDammit` 會使用已安裝的 `charset-normalizer` 偵測編碼；HW3 自動解析出 3.5.3，全量建置時 29 篇文件解碼不同（vocab +241、tokens +451），索引與 HW2 不再逐位元組相同。同一份程式碼在 3.5.2（根目錄環境的版本）下 29 篇全部一致，因此 `HW3/pyproject.toml` 鎖定 `charset-normalizer==3.5.2`（理由也記在 `hwlib/README.md`）。其餘直接依賴一律以 `==` 鎖定。<br>測試用標準函式庫 `unittest`，不需要新增測試套件。（依 A1 / 討論修正） | `pyproject.toml`；`uv.lock`；本機 scratch 解析結果（不進版控）；`HW3/pyproject.toml`、`HW3/uv.lock`；`HW2/src/{extract,tokenizer}.py`；A1 驗證 4 | Claude Code / 2026-11-25、2026-11-26 |
+| VERIFY-15 | **待查**：實作 `embed.py` 時查證。 | — | — |
