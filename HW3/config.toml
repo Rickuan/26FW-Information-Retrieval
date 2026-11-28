@@ -19,6 +19,9 @@ batch_size = 64
 k_each = 20              # 詞彙、語意兩路各取幾篇
 k_final = 5              # 合併後送進 LLM 的篇數
 rrf_k = 60
+# hybrid 只過濾「只出現在語意那一路、且語意分數（cosine）低於此值」的文件；兩路都有的文件不受影響。
+# 這個值依目前的 embedding 模型與前綴定出（A5 V2），更換 embedding 設定時要重新評估。
+semantic_min_score = 0.30
 passage_words = 300
 passage_stride = 250     # 相鄰 passage 重疊 50 字
 prompt_passage_max_words = 300

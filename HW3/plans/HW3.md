@@ -135,6 +135,7 @@ batch_size = 64
 k_each = 20              # 詞彙、語意兩路各取幾篇
 k_final = 5              # 合併後送進 LLM 的篇數
 rrf_k = 60
+semantic_min_score = 0.30   # 只過濾「只出現在語意那一路、且語意分數低於此值」的文件（2.7）
 passage_words = 300
 passage_stride = 250     # 相鄰 passage 重疊 50 字
 prompt_passage_max_words = 300
@@ -171,6 +172,7 @@ target_trec_ids = []
   - 與工作目錄無關；不跟隨 symlink。
 - **建置完成檢查**：`rag.config.require_build_done(build_meta_path) -> dict` 確認 build_meta 檔案存在且 `status == "done"`（呼叫端傳入 `paths(...)["build_meta"]`，檔名不寫死），否則 raise `BuildNotDoneError`，訊息提示重新執行 build（`status` 為 `"in_progress"` 時說明上次建置未完成）；通過時回傳 build_meta 內容。lexical、eval 啟動時都必須呼叫（2.6、3.5）；semantic 透過 `load_vectorstore` 呼叫（2.5、3.3）。build_meta 無法解析時也 raise `BuildNotDoneError`。
 - **`rag.config` 其他介面**：`load_config(config_path=CONFIG_PATH, local_path=LOCAL_CONFIG_PATH) -> dict`；`get_config() -> dict`（整個 process 只讀一次，回傳深複本，一般程式用這個）；常數 `HW3_ROOT`、`CONFIG_PATH`、`LOCAL_CONFIG_PATH`；例外 `ConfigError(ValueError)`（設定不合法）、`BuildNotDoneError(RuntimeError)`。`[runtime] use_fixtures` 必須是布林值。（依 A1–A3 同步）
+- **`[retrieval] semantic_min_score`**（A5 新增，預設 0.30）：hybrid 合併時，只出現在語意那一路、且語意分數（cosine）低於此值的文件不納入；兩路都有的文件不受影響（2.7）。這個值依目前的 embedding 模型與前綴定出，更換 `[embed]` 設定時要重新評估；eval 會檢查它有沒有擋掉 gold（3.5）。可在 `config.local.toml` 覆寫。
 - 前綴字串要原樣保留，包括 `|` 兩側的空白和結尾的空白。`langchain-ollama` 會把文字原樣送出，所以前綴一律由 `embed.py` 加上。
 - embeddinggemma 的輸入上限是 2048 tokens。絕大多數 300 字的 passage 在範圍內；全量有 53 段（31 篇，多為序列化資料等符號密集文字）超過，由 Ollama 預設截斷保留開頭 2,048 tokens，不需處理（`[VERIFY-15]`、2.5）。（依 A3 修正）
 （依 A1 / 討論修正）
@@ -284,7 +286,7 @@ def retrieve(query: str, k: int | None = None,
 6. 提示與進度訊息只寫到 `stderr`；回答與結果寫到 `stdout`（與 HW2 一致）。hwlib 函式 print 到 stdout 的輸出，由 `hw_bridge` 轉到 stderr（見 2.1）
 7. 單元測試（`unittest`）**只寫以下三項**，只使用測試程式內自建的小資料，不依賴 `fixtures/`（不進版控，乾淨 clone 上不存在）或全量產物。`fixtures/` 用於手動測試與整合測試：
    - `passages`（切分邊界、短文件、空文件）
-   - `fusion`（RRF 分數、同分規則、passage 選擇、sources）
+   - `fusion`（RRF 分數、同分規則的三個層級、語意門檻（只過濾只在語意那一路的文件，兩路都有的不受影響）、passage 選擇、sources）
    - `embed`（query / doc 前綴各加一次、空白原樣保留；輸入已以該前綴開頭 → `ValueError`；輸出已 L2 normalize；兩種模式的 `num_gpu`）
    - 檔名：放在被測模組旁邊，命名為 `<模組>.test.py`（例如 `rag/passages.py` → `rag/passages.test.py`），依照 AGENTS.md 的慣例。
    - 寫法：使用 `unittest.TestCase`，檔尾加上 `if __name__ == "__main__": unittest.main()`。
@@ -292,7 +294,7 @@ def retrieve(query: str, k: int | None = None,
    - 執行（在 `HW3/` 下）：`uv run python src/rag/passages.test.py`；全部執行用 `for f in src/rag/*.test.py; do uv run python "$f" || break; done`。
    - 不能用 `python -m unittest <路徑>` 或 `unittest discover -p "*.test.py"`：檔名中多了一個 `.`，無法當成模組名稱匯入（已實測，前者報錯，後者找到 0 個測試）。
    - 不修改 AGENTS.md，HW3 的測試一律以本節的指令執行。
-   - 目前的測試檔：`passages.test.py`（12 項）、`embed.test.py`（15 項）。
+   - 目前的測試檔：`passages.test.py`（12 項）、`embed.test.py`（15 項）、`fusion.test.py`（20 項，A5）。
    （依 A1 / 討論修正）（依 A1–A3 同步）
 8. 尚未完成的相依元件，先用介面相同的假實作（例如 `fake_retrieve()`），不得等待
 9. 開發時可以使用小模型 `qwen3:1.7b`（在 `config.local.toml` 設定，見 1.3），最後調整時再換回 `qwen3:8b`
@@ -525,27 +527,49 @@ class Ranker:
 - `LexicalRetriever(BaseRetriever)`，`_get_relevant_documents(query)`：
   1. `preprocess(query)` 得到 term 序列。**不經過 HW2 的 query parser**：parser 會把 `AND/OR/NOT`、引號、括號、`*`、`?` 當成語法處理，未配對的引號會讓它 raise ValueError。
   2. 呼叫 `Ranker.search(terms, k_each)` 取 top-`k_each` 篇（`[VERIFY-06]`）。
-  3. 每篇從 `get_passages_by_doc` 挑最佳 passage：對每段 passage 執行 `preprocess`，以 query term 命中次數計分，同分取 pid 較小者。
+  3. 每篇從 `get_passages_by_doc` 挑最佳 passage：對每段 passage 執行 `preprocess`，先比命中的**不同** query term 數，再比 query term 的總命中次數，同分取 pid 較小者（A5 決定：先比涵蓋度，避免單一 term 重複出現的段落勝出）。所有段落都沒有命中時取 pid 最小的一段。
      - 不使用索引中的位置資訊來定位 passage：位置是「保留停用詞空洞的 token 序號」，對不回清理後文字的字位置。
 - 查詢沒有任何有效 term（例如全是停用詞）時回傳空清單，不報錯。
 - **啟動時**：路徑取自 `paths(cfg["runtime"]["use_fixtures"])`，並先呼叫 `require_build_done(paths(...)["build_meta"])`；建置未完成就直接報錯，不載入索引（1.3）。
-（依討論修正）
+- 已完成（A5）：`best_passage(query_terms, passages)` 為模組層級純函式。全量實測：兩個學號各回傳恰好 3 篇，且 = `target_trec_ids`，passage 都含埋入句子；fact 題 gold 排第 2、3 名（前面是同站頁面）；最佳 passage 0 命中的情況 0 次；全停用詞或未知詞 → `[]`，未配對引號、`AND`、括號照常查詢。啟動 0.08 秒；第一次 search 約 0.5 秒（冷啟動），之後每題（含選 passage）約 25–160 ms。
+（依討論修正）（依 A5 修正）
 
 ### 2.7 RRF 合併（`rag/fusion.py`）與統一介面（`rag/retrieve.py`）
 - `HybridRetriever(BaseRetriever)`：
   1. 詞彙、語意兩路各取 `k_each` 篇（語意那一路已依 docid 去重）
-  2. `score(d) = Σ 1 / (rrf_k + rank_i(d))`，rank 從 1 起算；只出現在一路的文件只算那一路
-  3. 依 score 遞減排序，同分依 docid 遞增（與 HW2 破同分規則一致）
-  4. passage 選擇：優先用語意那一路命中的 pid，沒有則用詞彙那一路的 pid
-  5. `sources` 記錄來源
-- 開發時先接假資料（兩路的假結果）寫好並通過單元測試，不等 semantic 完成。
-- `retrieve()` 依 `mode` 分派到三個 retriever 之一，回傳前 k 筆並補上 `rank`
-- **待決（A5）：RRF 同分問題**
+  2. `score(d) = Σ 1 / (rrf_k + rank_i(d))`，rank 從 1 起算，取該路清單中的位置；只出現在一路的文件只算那一路
+  3. **語意門檻**：只出現在語意那一路、且語意分數 < `semantic_min_score`（1.3）的文件不納入；兩路都有的文件不受影響；過濾不改變語意那一路其他文件的名次
+  4. 依 score 遞減排序（以分數精確比較）；**同分時**先排兩路都有出現的文件，再排只出現在詞彙那一路的，最後才是只出現在語意那一路的；仍同分時依 docid 遞增
+  5. passage 選擇：優先用語意那一路命中的 pid，沒有則用詞彙那一路的 pid
+  6. `sources` 記錄來源（固定順序 `["lexical", "semantic"]` 的子集）
+- 合併邏輯為純函式 `rrf_fuse(lexical, semantic, *, rrf_k, semantic_min_score=None)`；`fusion.py` 不匯入 hwlib、faiss，單元測試只用自建的 Document（1.6-7）。
+- `retrieve()` 依 `mode` 分派到三個 retriever 之一，回傳前 k 筆並重新編號 `rank`；`k` 必須是 ≥ 1 的整數、`mode` 不合法 → `ValueError`；可用筆數不足 `k` 時回傳較少的筆數。retriever 整個 process 只建立一次，hybrid 共用 lexical、semantic 的實例。
+- **semantic 尚未接上**（A5 時點）：`mode` 為 `semantic` 或 `hybrid`（預設）時 raise `NotImplementedError`，訊息說明 semantic 尚未接上；不提供假實作。B 的 `semantic` 完成後只需修改 `retrieve.py` 中建立語意 retriever 的函式。fusion 的驗證暫時使用 scratch 中的語意查詢（依 3.3 的步驟）。
+- **已決定（A5）：RRF 同分問題**
   - 現象：A3 的 V4（`--limit 200`）中，語意檢索把兩個學號的正確文件排在 200 篇中的第 180、195 名，不會進入 `k_each = 20`；語意那一路的前幾名是拼字變體列表等雜訊頁。
-  - 影響：學號查詢時，詞彙那一路只有埋入的 3 篇（第 1–3 名），語意那一路的第 1–3 名是無關文件，兩路同名次的 RRF 分數兩兩相同（例如 `1/(60+1)`）。依目前「同分依 docid 遞增」的規則，第 3 篇 gold 可能被擠出前 `k_final` 名，References 也會混入無關文件。
-  - 候選解法：(a) 同分時優先排兩路都出現的文件，其次優先排詞彙那一路的文件；(b) 加權 RRF（例如詞彙 1.0、語意 0.8）；(c) 提高 `k_final`。
-  - A5 實作 fusion 時，用全量資料查詢兩個學號與 fact 題，比較各解法後決定，並更新上方第 3 步與 1.6-7 的 `fusion` 測試項目。
-（依 A1–A3 同步）
+  - 全量資料（A4 V6，依 docid 去重，共 34,785 篇）：115598067 的 3 篇 gold 排第 3,408（docid 15079）、9,313（19）、11,858（30250）名；115598022 的 docid 30233 排**第 2 名**（命中的是含埋入句子的 169 字尾段 passage，句子在其中的比重較大），另外兩篇排第 9,733（15051）、18,249（18）名。語意前 5 名多為授權條款、年份 / 數字列表等雜訊頁。
+  - 影響：學號查詢時，詞彙那一路只有埋入的 3 篇（第 1–3 名），語意那一路的第 1–3 名是無關文件，兩路同名次的 RRF 分數兩兩相同（例如 `1/(60+1)`）。原本「同分依 docid 遞增」的規則下，第 3 篇 gold 可能被擠出前 `k_final` 名，References 也會混入無關文件。
+  - V6 顯示同分問題主要影響**沒被語意命中**的 gold 文件：被語意命中的 gold（如 30233）兩路都有分數，自然排在前面；其餘 gold 只有詞彙一路的分數，才會和語意那一路的雜訊頁同分。
+  - 候選：(a) 同分時兩路都有 > 只有詞彙 > 只有語意；(b) 加權 RRF（詞彙 1.0、語意 0.8）；(c) `k_final` 改為 8；(d)（A5 新增）只出現在語意那一路、且 cosine 低於門檻 τ 的文件不納入。
+  - **A5 V2 比較**（全量，兩路各 20 篇；格式：gold 在前 5 的名次／無關文件數；fact 題把同站的 docid 19–21 算相關；a3f1、a3f2 為 A3 V4 的 fact 題，a3f2 是 paraphrase，gold 語意分數 0.492）：
+    | 候選 | a3f1 | a3f2（paraphrase） | 115598067 | 115598022 |
+    |---|---|---|---|---|
+    | 原規則（同分依 docid） | 2／2 | 1／2 | **1, 4（缺 1 篇）**／3 | 1, 2, 4／2 |
+    | (a) | 2／2 | 1／2 | 1, 3, 5／2 | 1, 2, 4／2 |
+    | (b) w = 0.8 | 2／2 | 1／2 | 1, 2, 3／2 | 1, 2, 3／2 |
+    | (c) k_final = 8 | 2／5 | 1／5 | 1, 4, 6／5 | 1, 2, 4／5 |
+    | (d) τ = 0.26 | 2／2 | 1／2 | 1, 2, 3／0（只回 3 篇） | 1, 2, 4／2 |
+    | (d) τ = 0.28–0.45 | 2／2 | 1／2 | 1, 2, 3／0（3 篇） | 1, 2, 3／0（3 篇） |
+    - 測試的門檻為 0.26、0.28、0.30、0.32、0.35、0.40、0.45，paraphrase 題 gold 在每個門檻下都排第 1 名；(a)+(d) 的結果和 (d) 相同，只有 a3f1 第 4、5 名同分時的順序不同。學號題語意雜訊的最高分為 0.279。
+  - **決定：(a) + (d)，τ = 0.30**（`semantic_min_score`）。理由：
+    - (a) 不改變分數、沒有參數；就算門檻沒擋下雜訊，同分時詞彙那一路的文件仍會排在語意雜訊之前。
+    - (d) 讓學號題 References 中的語意雜訊降到 0；fact 題不受影響（語意雜訊被擋下後，空位由詞彙那一路遞補）。
+    - τ = 0.30 高於學號題語意雜訊的最高分（0.279），遠低於 paraphrase gold（0.492）。
+    - 兩種出錯方式的代價不對稱：門檻太低只會退回 (a) 的結果；門檻太高才會擋掉只在語意那一路出現的 gold，造成實際損失。目前的門檻離 gold 很遠、離雜訊很近，偏向安全的一側。
+    - 不採用 (b)：在 4 題中看起來最好，但 paraphrase 題若只被語意那一路命中，gold 會掉到第 17 名之後（`1/(60+r) > 0.8/61 ⇔ r ≤ 16`），這個風險沒有被測到。不採用 (c)：每題的雜訊都增加。
+    - 限制：門檻只用 4 題、一組 embedding 設定定出；B 的 eval 要檢查只被語意那一路找到的 gold 分數，低於門檻就調低（3.5）。
+  - A5 V3（全量，決定後的規則 + 暫時的語意查詢）：兩個學號都取回 3 篇 gold、0 篇雜訊（hybrid 只回傳 3 篇），6 篇 gold 的 passage 都含埋入句子；fact 兩題的 gold 名次不變。
+（依 A1–A3 同步）（依 A5 決定）
 
 ### 2.8 一鍵重建（`main.py build` → `rag/build.py`）
 - 輸入：`injected_warc`（以 `tools/inject_warc.py` 產生，見 2.2）。不存在時報錯，提示先執行 `uv run python tools/inject_warc.py`。
@@ -622,6 +646,8 @@ Question: <question>
 - 無 RAG 版：system prompt 只保留第一句與最後一句；user prompt 只放問題
 - 每段 passage 最多 `prompt_passage_max_words` 字，超過就截斷並加上 `...`
 - 用 `ChatPromptTemplate` 組合：`prompt | llm | 輸出解析`
+- 建議：檢索結果少於 `k_final` 筆時，prompt 只放實際取得的文件，不補空白段落，也不假設固定有 `k_final` 段。理由：`semantic_min_score`（1.3、2.7）會過濾只出現在語意那一路的低分文件，結果筆數因此可能少於 `k_final`；例如學號查詢的 hybrid 只回傳 3 篇（A5 V3）。
+（依 A5 補充）
 
 ### 3.3 語意檢索（`rag/semantic.py`）
 - `SemanticRetriever(BaseRetriever)`：
@@ -633,7 +659,9 @@ Question: <question>
   3. 同一 docid 只保留分數最好的 passage，取前 `k_each` 篇
   4. 以 docstore 的 `get_doc(docid)` 補上 `trec_id`、`url`，依 1.4 的 metadata 格式組成 `Document` 輸出
 - B 的責任範圍：查詢、依 docid 去重、補 `trec_id` 與 `url`、組成 metadata；向量庫的載入細節屬於 A（2.5）。
-（依 VERIFY-12 修正）（依討論修正）（依 A1–A3 同步）
+- 建議：依 docid 去重後，分數相同的文件依 docid 遞增排序。理由：全量語料中有多篇內容相同的頁面（例如授權條款頁），語意分數完全一樣（A5 V3 觀察）；沒有固定順序時，每次執行的結果順序可能不同，eval 與截圖都無法重現。
+- 建議：`SemanticRetriever` 提供 `from_config(cfg=None)` 建構方式與 `k` 欄位（預設 `k_each`），與 `LexicalRetriever` 一致。理由：`HybridRetriever.from_config(lexical, semantic, cfg=None)` 與 `retrieve()` 以相同方式建立兩路 retriever，介面一致時，整合只需替換 `retrieve.py` 中建立語意 retriever 的一行（設計見 `plans/.done.A5-lexical-fusion-retrieve.md` 第 7 節）。
+（依 VERIFY-12 修正）（依討論修正）（依 A1–A3 同步）（依 A5 補充）
 
 ### 3.4 CLI（`main.py query` → `rag/cli.py`）
 ```
@@ -662,12 +690,15 @@ uv run python src/main.py query --interactive        # 選做：prompt> 互動�
   - `--mode none` 不需要建置產物，所以不呼叫 `require_build_done`。
   - `lexical`、`semantic`、`hybrid` 由對應的 retriever 在啟動時檢查（2.6、3.3）。
   - `--compare` 在**開始時**先呼叫 `require_build_done(paths(use_fixtures)["build_meta"])`，未完成就直接報錯並以 exit 1 結束，不輸出無 RAG 的回答。原因：避免先花時間產生無 RAG 回答，最後才因建置未完成而失敗。
+- 建議：檢索結果少於 `k_final` 筆時，References 依實際筆數編號與輸出，不補空白項目，也不視為錯誤。理由：`semantic_min_score`（1.3、2.7）會過濾只出現在語意那一路的低分文件，結果筆數因此可能少於 `k_final`；例如學號查詢的 hybrid 只回傳 3 篇（A5 V3）。
+（依 A5 補充）
 
 ### 3.5 評估（`main.py eval` → `rag/evaluate.py`）
 - 子指令註冊（1.2）：在 `rag/evaluate.py` 實作 `HELP`、`add_arguments(parser)`、`run(args) -> int`，不修改 `main.py`。
 - **生成對照（必做，截圖的來源）**：每一題跑 `none` 與 `hybrid`，把問題、兩個回答、引用文件寫到 `output/compare.md`
 - **檢索評估（加分項，保留）**：對 testset 每一題跑 lexical / semantic / hybrid，計算 Hit@1、Hit@5、MRR（命中 `gold_docids` 任一篇即算），**分 fact / token 兩類**，fact 再分出 `paraphrase` 題，輸出 Markdown 表格到 `output/retrieval_eval.md`
-- 預期現象（報告會用到）：token 題（純學號）lexical 強；**semantic 幾乎完全失效**（A3 V4：兩個學號的正確文件在 200 篇中排第 180、195 名，語意前幾名是雜訊頁），hybrid 能否穩定取回 3 篇取決於 2.7 的同分處理；paraphrase 題 semantic 較強；hybrid 在各類題目都應穩定。（依 A1–A3 同步）
+- **語意門檻檢查（必做，A5）**：`retrieval_eval.md` 另外輸出「只被語意那一路找到的 gold 文件及其語意分數」，也就是出現在語意那一路前 `k_each`、但不在詞彙那一路的 gold。用來確認 `semantic_min_score`（1.3、2.7）沒有擋掉相關文件；若有 gold 的分數低於門檻，要回報並調低門檻。
+- 預期現象（報告會用到）：token 題（純學號）lexical 強；**semantic 幾乎完全失效**（A3 V4：兩個學號的正確文件在 200 篇中排第 180、195 名，語意前幾名是雜訊頁），hybrid 能穩定取回 3 篇（2.7 的同分規則與語意門檻；A5 V3 全量：兩個學號都是 3 篇 gold、0 篇雜訊）；paraphrase 題 semantic 較強；hybrid 在各類題目都應穩定。純數字 token 在語意檢索中多半失效，但若埋入句子位於很短的 passage，仍可能被語意檢索找到（A4 V6 全量：115598022 的 docid 30233 因句子落在 169 字的尾段 passage，語意排第 2 名；其餘 5 篇都在第 3,000 名之後）。（依 A1–A3 同步）（依 A4 V6 補充）
 - **啟動時**：路徑（含 `output_dir`）取自 `paths(cfg["runtime"]["use_fixtures"])`，因此 `use_fixtures = true` 時輸出到 `fixtures/output/`。這是刻意的設計：避免 fixtures 的 eval 結果覆蓋正式輸出。先呼叫 `require_build_done(paths(...)["build_meta"])`，建置未完成就直接報錯，不跑任何題目（1.3）。
 （依討論修正）
 
